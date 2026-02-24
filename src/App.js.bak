@@ -1,0 +1,674 @@
+import React, { useState } from 'react';
+import { Plus, Trash2, Download, Image, FileSpreadsheet, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
+
+const ContainerOptimizer = () => {
+  const [products, setProducts] = useState([]);
+  const [containers, setContainers] = useState([]);
+  const [newProduct, setNewProduct] = useState({ 
+    markNo: '',
+    description: '', 
+    photo: '',
+    ctn: '',
+    pcsPerCtn: '',
+    gwPerCtn: '',
+    nwPerCtn: '',
+    cbmPerCtn: ''
+  });
+
+  const [capacity, setCapacity] = useState({
+    maxWeight: 27000,
+    maxCbm: 76
+  });
+
+  const maxWeight = parseFloat(capacity.maxWeight) || 0;
+  const maxCbm = parseFloat(capacity.maxCbm) || 0;
+
+  const extractXlsxData = async (file) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      
+      // Parse spreadsheet data
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      
+      // Extract images from the xlsx zip
+      const imageMap = {}; // row number -> base64 image
+      try {
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        
+        // Read drawing relationships
+        const relsFile = zip.file('xl/drawings/_rels/drawing1.xml.rels');
+        const drawingFile = zip.file('xl/drawings/drawing1.xml');
+        
+        if (relsFile && drawingFile) {
+          const relsXml = await relsFile.async('string');
+          const drawingXml = await drawingFile.async('string');
+          
+          // Map rId to image file path
+          const rIdMap = {};
+          const relMatches = relsXml.matchAll(/Id="(rId\d+)"[^>]*Target="([^"]+)"/g);
+          for (const m of relMatches) {
+            rIdMap[m[1]] = m[2].replace('../', 'xl/');
+          }
+          
+          // Map row number to rId from drawing XML (oneCellAnchor)
+          const anchorPattern = /<xdr:oneCellAnchor>([\s\S]*?)<\/xdr:oneCellAnchor>/g;
+          let anchor;
+          while ((anchor = anchorPattern.exec(drawingXml))) {
+            const content = anchor[1];
+            const fromRow = content.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
+            const rIdMatch = content.match(/r:embed="(rId\d+)"/);
+            if (fromRow && rIdMatch) {
+              const row = parseInt(fromRow[1]);
+              const imagePath = rIdMap[rIdMatch[1]];
+              if (imagePath) {
+                const imgFile = zip.file(imagePath);
+                if (imgFile) {
+                  const imgData = await imgFile.async('base64');
+                  const ext = imagePath.split('.').pop().toLowerCase();
+                  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+                  imageMap[row] = `data:${mimeType};base64,${imgData}`;
+                }
+              }
+            }
+          }
+        }
+      } catch (imgErr) {
+        console.warn('Could not extract images:', imgErr);
+      }
+      
+      let allData = [];
+      
+      // Columns: A=No, B=Description, C=Material, D=Function, E=Photo, F=CTN, G=QTY/CTN, H=Total, I=U/PRICE, J=Amount, K=CBM, L=W.G.
+      // Data starts at row index 3 (rows 0=empty, 1=Chinese headers, 2=English headers)
+      for (let i = 3; i < rows.length; i++) {
+        const row = rows[i];
+        const markNo = String(row[0] || '').trim();
+        
+        // Skip non-product rows (empty or summary rows)
+        if (!markNo || !markNo.match(/^\d+-\d+$/)) continue;
+        
+        const description = [row[1], row[2], row[3]].map(v => String(v || '').trim()).filter(Boolean).join(' ') || markNo;
+        const ctn = parseInt(row[5]) || 1;
+        const pcsPerCtn = parseInt(row[6]) || 0;
+        const cbm = parseFloat(row[10]) || 0;
+        const weight = parseFloat(row[11]) || 0;
+        const photo = imageMap[i] || '';
+        
+        allData.push({
+          markNo,
+          description,
+          photo,
+          ctn: ctn.toString(),
+          pcsPerCtn: pcsPerCtn.toString(),
+          gwPerCtn: (weight / ctn).toFixed(2),
+          nwPerCtn: (weight * 0.9 / ctn).toFixed(2),
+          cbmPerCtn: (cbm / ctn).toFixed(4)
+        });
+      }
+      
+      return allData;
+    } catch (error) {
+      console.error('XLSX extraction error:', error);
+      alert('Error reading XLSX: ' + error.message);
+      return [];
+    }
+  };
+
+  const handleXlsxUpload = async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      try {
+        const xlsxData = await extractXlsxData(file);
+        
+        const newProducts = xlsxData.map(data => ({
+          id: Date.now() + Math.random(),
+          markNo: data.markNo,
+          description: data.description,
+          photo: data.photo,
+          ctn: parseInt(data.ctn),
+          pcsPerCtn: parseInt(data.pcsPerCtn),
+          totalQty: parseInt(data.ctn) * parseInt(data.pcsPerCtn),
+          gwPerCtn: parseFloat(data.gwPerCtn),
+          nwPerCtn: parseFloat(data.nwPerCtn),
+          cbmPerCtn: parseFloat(data.cbmPerCtn),
+          totalGW: parseFloat(data.gwPerCtn) * parseInt(data.ctn),
+          totalNW: parseFloat(data.nwPerCtn) * parseInt(data.ctn),
+          totalCBM: parseFloat(data.cbmPerCtn) * parseInt(data.ctn)
+        }));
+        
+        setProducts([...products, ...newProducts]);
+        
+        const withPhotos = newProducts.filter(p => p.photo).length;
+        alert(`Loaded ${newProducts.length} products from XLSX (${withPhotos} with photos)`);
+      } catch (error) {
+        alert('Failed to load XLSX: ' + error.message);
+      }
+    }
+    e.target.value = '';
+  };
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setNewProduct({...newProduct, photo: reader.result});
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const addProduct = () => {
+    if (newProduct.description && newProduct.ctn && newProduct.pcsPerCtn) {
+      const ctn = parseInt(newProduct.ctn) || 0;
+      const pcsPerCtn = parseInt(newProduct.pcsPerCtn) || 0;
+      const gwPerCtn = parseFloat(newProduct.gwPerCtn) || 0;
+      const nwPerCtn = parseFloat(newProduct.nwPerCtn) || 0;
+      const cbmPerCtn = parseFloat(newProduct.cbmPerCtn) || 0;
+      
+      setProducts([...products, {
+        id: Date.now(),
+        markNo: newProduct.markNo,
+        description: newProduct.description,
+        photo: newProduct.photo,
+        ctn: ctn,
+        pcsPerCtn: pcsPerCtn,
+        totalQty: ctn * pcsPerCtn,
+        gwPerCtn: gwPerCtn,
+        nwPerCtn: nwPerCtn,
+        cbmPerCtn: cbmPerCtn,
+        totalGW: gwPerCtn * ctn,
+        totalNW: nwPerCtn * ctn,
+        totalCBM: cbmPerCtn * ctn
+      }]);
+      setNewProduct({ 
+        markNo: '',
+        description: '', 
+        photo: '',
+        ctn: '',
+        pcsPerCtn: '',
+        gwPerCtn: '',
+        nwPerCtn: '',
+        cbmPerCtn: ''
+      });
+    }
+  };
+
+  const removeProduct = (id) => {
+    setProducts(products.filter(p => p.id !== id));
+  };
+
+  const optimizeContainers = () => {
+    // Expand products by carton
+    const expandedProducts = [];
+    products.forEach(product => {
+      for (let i = 0; i < product.ctn; i++) {
+        expandedProducts.push({
+          ...product,
+          originalId: product.id,
+          instanceId: `${product.id}-${i}`,
+          singleCtnGW: product.gwPerCtn,
+          singleCtnNW: product.nwPerCtn,
+          singleCtnCBM: product.cbmPerCtn
+        });
+      }
+    });
+
+    // Sort by GW descending
+    expandedProducts.sort((a, b) => b.singleCtnGW - a.singleCtnGW);
+
+    const newContainers = [];
+    let currentContainer = {
+      id: 1,
+      items: [],
+      totalGW: 0,
+      totalNW: 0,
+      totalCBM: 0,
+      totalCartons: 0
+    };
+
+    expandedProducts.forEach(product => {
+      // Check if carton fits in current container
+        if (currentContainer.totalGW + product.singleCtnGW <= maxWeight &&
+          currentContainer.totalCBM + product.singleCtnCBM <= maxCbm) {
+        currentContainer.items.push(product);
+        currentContainer.totalGW += product.singleCtnGW;
+        currentContainer.totalNW += product.singleCtnNW;
+        currentContainer.totalCBM += product.singleCtnCBM;
+        currentContainer.totalCartons += 1;
+      } else {
+        if (currentContainer.items.length > 0) {
+          newContainers.push(currentContainer);
+        }
+        currentContainer = {
+          id: newContainers.length + 1,
+          items: [product],
+          totalGW: product.singleCtnGW,
+          totalNW: product.singleCtnNW,
+          totalCBM: product.singleCtnCBM,
+          totalCartons: 1
+        };
+      }
+    });
+
+    if (currentContainer.items.length > 0) {
+      newContainers.push(currentContainer);
+    }
+
+    setContainers(newContainers);
+  };
+
+  const exportToCSV = () => {
+    let csv = '';
+    
+    containers.forEach((container) => {
+      csv += `CONTAINER ${container.id}\n`;
+      csv += `Total Cartons: ${container.totalCartons}\n`;
+      csv += `Total G.W.: ${container.totalGW.toFixed(2)} KGS\n`;
+      csv += `Total N.W.: ${container.totalNW.toFixed(2)} KGS\n`;
+      csv += `Total CBM: ${container.totalCBM.toFixed(2)} M³\n\n`;
+      
+      csv += `MARKS&NO,DESCRIPTION,CTN,PCS/CTN,UNIT,T/QTY,G.W.(KGS),N.W.(KGS),CBM\n`;
+      
+      const groupedItems = {};
+      container.items.forEach(item => {
+        if (!groupedItems[item.description]) {
+          groupedItems[item.description] = { 
+            count: 0,
+            markNo: item.markNo,
+            pcsPerCtn: item.pcsPerCtn,
+            gwPerCtn: item.gwPerCtn,
+            nwPerCtn: item.nwPerCtn,
+            cbmPerCtn: item.cbmPerCtn,
+            photo: item.photo
+          };
+        }
+        groupedItems[item.description].count++;
+      });
+
+      Object.entries(groupedItems).forEach(([desc, data]) => {
+        const totalQty = data.count * data.pcsPerCtn;
+        const totalGW = data.gwPerCtn * data.count;
+        const totalNW = data.nwPerCtn * data.count;
+        const totalCBM = data.cbmPerCtn * data.count;
+        
+        csv += `"${data.markNo}","${desc}",${data.count},${data.pcsPerCtn},PCS,${totalQty},${totalGW.toFixed(2)},${totalNW.toFixed(2)},${totalCBM.toFixed(2)}\n`;
+      });
+      
+      csv += `\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'packing_list.csv';
+    a.click();
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      addProduct();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <FileSpreadsheet className="w-8 h-8 text-blue-600" />
+            <h1 className="text-3xl font-bold text-gray-800">Container Packing List Generator</h1>
+          </div>
+          <p className="text-gray-600 mb-4">Max capacity per container: {maxWeight.toLocaleString()} kg / {maxCbm.toLocaleString()} m3</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <input
+              type="number"
+              step="0.01"
+              placeholder="Max container weight (kg)"
+              value={capacity.maxWeight}
+              onChange={(e) => setCapacity({ ...capacity, maxWeight: e.target.value })}
+              className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <input
+              type="number"
+              step="0.01"
+              placeholder="Max container CBM (m3)"
+              value={capacity.maxCbm}
+              onChange={(e) => setCapacity({ ...capacity, maxCbm: e.target.value })}
+              className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          {/* XLSX Upload */}
+          <div className="bg-slate-50 rounded-lg p-6 mb-6 border border-slate-200">
+            <h2 className="text-lg font-semibold mb-4 text-gray-700">Import from Excel</h2>
+            <label className="flex items-center gap-2 cursor-pointer bg-blue-50 px-4 py-3 rounded border-2 border-blue-300 hover:bg-blue-100 transition w-fit">
+              <Upload className="w-5 h-5 text-blue-600" />
+              <span className="text-sm font-medium text-blue-700">Upload Product List (.xlsx)</span>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleXlsxUpload}
+                className="hidden"
+              />
+            </label>
+            <p className="text-xs text-gray-500 mt-2">Supports Excel files with columns: No, Description, Material, Function, Photo, CTN, QTY/CTN, Total, Price, Amount, CBM, Weight</p>
+          </div>
+
+          {/* Add Product Form */}
+          <div className="bg-slate-50 rounded-lg p-6 mb-6 border border-slate-200">
+            <h2 className="text-lg font-semibold mb-4 text-gray-700">Add Product</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <input
+                type="text"
+                placeholder="MARKS&NO (e.g., 1-1)"
+                value={newProduct.markNo}
+                onChange={(e) => setNewProduct({...newProduct, markNo: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="text"
+                placeholder="DESCRIPTION"
+                value={newProduct.description}
+                onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="number"
+                placeholder="CTN (Cartons)"
+                value={newProduct.ctn}
+                onChange={(e) => setNewProduct({...newProduct, ctn: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="number"
+                placeholder="PCS/CTN"
+                value={newProduct.pcsPerCtn}
+                onChange={(e) => setNewProduct({...newProduct, pcsPerCtn: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <input
+                type="number"
+                step="0.01"
+                placeholder="G.W. per carton (kg)"
+                value={newProduct.gwPerCtn}
+                onChange={(e) => setNewProduct({...newProduct, gwPerCtn: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="number"
+                step="0.01"
+                placeholder="N.W. per carton (kg)"
+                value={newProduct.nwPerCtn}
+                onChange={(e) => setNewProduct({...newProduct, nwPerCtn: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <input
+                type="number"
+                step="0.01"
+                placeholder="CBM per carton (m³)"
+                value={newProduct.cbmPerCtn}
+                onChange={(e) => setNewProduct({...newProduct, cbmPerCtn: e.target.value})}
+                onKeyPress={handleKeyPress}
+                className="px-4 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer bg-white px-4 py-2 rounded border border-gray-300 hover:bg-gray-50 transition">
+                <Image className="w-4 h-4 text-gray-600" />
+                <span className="text-sm text-gray-700">Upload Photo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  className="hidden"
+                />
+              </label>
+              {newProduct.photo && (
+                <div className="flex items-center gap-2">
+                  <img src={newProduct.photo} alt="Preview" className="w-12 h-12 object-cover rounded border" />
+                  <button
+                    onClick={() => setNewProduct({...newProduct, photo: ''})}
+                    className="text-red-600 text-sm hover:text-red-800"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={addProduct}
+                className="ml-auto bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Add Product
+              </button>
+            </div>
+          </div>
+
+          {/* Products List */}
+          {products.length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold mb-4 text-gray-700">Products List</h2>
+              <div className="bg-white border-2 border-gray-300 rounded overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-100 border-b-2 border-gray-300">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">MARKS&NO</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">DESCRIPTION</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">PHOTO</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">CTN</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">PCS/CTN</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">UNIT</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">T/QTY</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">G.W.(KGS)</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">N.W.(KGS)</th>
+                      <th className="px-3 py-2 text-left font-bold border-r border-gray-300">(CBM)</th>
+                      <th className="px-3 py-2 text-left font-bold">ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((product) => (
+                      <tr key={product.id} className="border-b border-gray-300">
+                        <td className="px-3 py-2 border-r border-gray-300">{product.markNo}</td>
+                        <td className="px-3 py-2 border-r border-gray-300 font-medium">{product.description}</td>
+                        <td className="px-3 py-2 border-r border-gray-300">
+                          {product.photo ? (
+                            <img src={product.photo} alt={product.description} className="w-16 h-16 object-cover rounded border" />
+                          ) : (
+                            <div className="w-16 h-16 bg-gray-100 rounded border flex items-center justify-center">
+                              <Image className="w-6 h-6 text-gray-400" />
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 border-r border-gray-300">{product.ctn}</td>
+                        <td className="px-3 py-2 border-r border-gray-300">{product.pcsPerCtn}</td>
+                        <td className="px-3 py-2 border-r border-gray-300">PCS</td>
+                        <td className="px-3 py-2 border-r border-gray-300 font-medium">{product.totalQty}</td>
+                        <td className="px-3 py-2 border-r border-gray-300">{product.totalGW.toFixed(2)}</td>
+                        <td className="px-3 py-2 border-r border-gray-300">{product.totalNW.toFixed(2)}</td>
+                        <td className="px-3 py-2 border-r border-gray-300">{product.totalCBM.toFixed(2)}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => removeProduct(product.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                onClick={optimizeContainers}
+                className="mt-4 bg-green-600 text-white px-8 py-3 rounded hover:bg-green-700 transition font-semibold text-lg"
+              >
+                Generate Container Loading Plan
+              </button>
+            </div>
+          )}
+
+          {/* Container Results */}
+          {containers.length > 0 && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-gray-700">
+                  Packing List: {containers.length} Container{containers.length > 1 ? 's' : ''}
+                </h2>
+                <button
+                  onClick={exportToCSV}
+                  className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> Export to CSV
+                </button>
+              </div>
+
+              {containers.map((container) => {
+                const weightPercent = maxWeight > 0 ? (container.totalGW / maxWeight * 100) : 0;
+                const cbmPercent = maxCbm > 0 ? (container.totalCBM / maxCbm * 100) : 0;
+                
+                const groupedItems = {};
+                container.items.forEach(item => {
+                  if (!groupedItems[item.description]) {
+                    groupedItems[item.description] = { 
+                      count: 0,
+                      markNo: item.markNo,
+                      pcsPerCtn: item.pcsPerCtn,
+                      gwPerCtn: item.gwPerCtn,
+                      nwPerCtn: item.nwPerCtn,
+                      cbmPerCtn: item.cbmPerCtn,
+                      photo: item.photo
+                    };
+                  }
+                  groupedItems[item.description].count++;
+                });
+
+                return (
+                  <div key={container.id} className="bg-white rounded-lg p-6 mb-4 border-2 border-gray-300 shadow">
+                    <h3 className="text-xl font-bold text-gray-800 mb-4 bg-slate-100 p-3 rounded">
+                      CONTAINER #{container.id}
+                    </h3>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4 text-sm">
+                      <div className="bg-blue-50 p-3 rounded">
+                        <p className="text-gray-600">Total Cartons</p>
+                        <p className="text-xl font-bold text-blue-700">{container.totalCartons}</p>
+                      </div>
+                      <div className="bg-green-50 p-3 rounded">
+                        <p className="text-gray-600">G.W. (KGS)</p>
+                        <p className="text-xl font-bold text-green-700">{container.totalGW.toFixed(2)}</p>
+                      </div>
+                      <div className="bg-purple-50 p-3 rounded">
+                        <p className="text-gray-600">N.W. (KGS)</p>
+                        <p className="text-xl font-bold text-purple-700">{container.totalNW.toFixed(2)}</p>
+                      </div>
+                      <div className="bg-orange-50 p-3 rounded">
+                        <p className="text-gray-600">CBM</p>
+                        <p className="text-xl font-bold text-orange-700">{container.totalCBM.toFixed(2)}</p>
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-medium">Weight Utilization:</span>
+                        <span>{weightPercent.toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${weightPercent > 95 ? 'bg-red-500' : weightPercent > 80 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                          style={{ width: `${Math.min(weightPercent, 100)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-medium">Volume Utilization:</span>
+                        <span>{cbmPercent.toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full ${cbmPercent > 95 ? 'bg-red-500' : cbmPercent > 80 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                          style={{ width: `${Math.min(cbmPercent, 100)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+
+                    <div className="border-2 border-gray-300 rounded overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">MARKS&NO</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">DESCRIPTION</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">PHOTO</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">CTN</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">PCS/CTN</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">UNIT</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">T/QTY</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">G.W.(KGS)</th>
+                            <th className="px-3 py-2 text-left font-bold border-r border-gray-300">N.W.(KGS)</th>
+                            <th className="px-3 py-2 text-left font-bold">(CBM)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(groupedItems).map(([desc, data]) => {
+                            const totalQty = data.count * data.pcsPerCtn;
+                            const totalGW = data.gwPerCtn * data.count;
+                            const totalNW = data.nwPerCtn * data.count;
+                            const totalCBM = data.cbmPerCtn * data.count;
+                            
+                            return (
+                              <tr key={desc} className="border-b border-gray-300">
+                                <td className="px-3 py-2 border-r border-gray-300">{data.markNo}</td>
+                                <td className="px-3 py-2 border-r border-gray-300 font-medium">{desc}</td>
+                                <td className="px-3 py-2 border-r border-gray-300">
+                                  {data.photo ? (
+                                    <img src={data.photo} alt={desc} className="w-16 h-16 object-cover rounded border" />
+                                  ) : (
+                                    <div className="w-16 h-16 bg-gray-100 rounded border flex items-center justify-center">
+                                      <Image className="w-6 h-6 text-gray-400" />
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 border-r border-gray-300 font-medium">{data.count}</td>
+                                <td className="px-3 py-2 border-r border-gray-300">{data.pcsPerCtn}</td>
+                                <td className="px-3 py-2 border-r border-gray-300">PCS</td>
+                                <td className="px-3 py-2 border-r border-gray-300 font-medium">{totalQty}</td>
+                                <td className="px-3 py-2 border-r border-gray-300">{totalGW.toFixed(2)}</td>
+                                <td className="px-3 py-2 border-r border-gray-300">{totalNW.toFixed(2)}</td>
+                                <td className="px-3 py-2">{totalCBM.toFixed(2)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ContainerOptimizer;
