@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Plus, Download, Image, FileSpreadsheet, Upload, Search, ShoppingCart, Package, ChevronDown, ChevronUp, X, Trash2, ArrowUpDown, Edit3, Undo2, PlusCircle, CheckCircle, AlertTriangle, FileText, Copy, Loader, BarChart3, Clock } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { Plus, Download, Image, FileSpreadsheet, Upload, Search, ShoppingCart, Package, ChevronDown, ChevronUp, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
@@ -29,95 +29,6 @@ const ContainerOptimizer = () => {
 
   // CTN input per catalog row
   const [ctnInputs, setCtnInputs] = useState({});
-
-  // ─── NEW STATE: Sorting ─────────────────────────────────────────
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-
-  // ─── NEW STATE: Container deletion ──────────────────────────────
-  const [deleteModal, setDeleteModal] = useState({ show: false, containerId: null });
-  const [deletedContainers, setDeletedContainers] = useState([]);
-
-  // ─── NEW STATE: Toast notifications ─────────────────────────────
-  const [toastMessage, setToastMessage] = useState(null);
-  const toastTimeout = useRef(null);
-
-  // ─── NEW STATE: Container renaming ──────────────────────────────
-  const [containerNames, setContainerNames] = useState({});
-  const [editingContainerName, setEditingContainerName] = useState(null);
-  const [tempContainerName, setTempContainerName] = useState('');
-
-  // ─── NEW STATE: Add product to specific container ───────────────
-  const [addToContainerModal, setAddToContainerModal] = useState({ show: false, containerId: null });
-  const [addToContainerCtn, setAddToContainerCtn] = useState({});
-
-  // ─── NEW STATE: Loading indicator ───────────────────────────────
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  // ─── NEW STATE: Photo enlargement modal ─────────────────────────
-  const [photoModal, setPhotoModal] = useState({ show: false, src: '', alt: '' });
-
-  // ─── NEW STATE: Clear all confirmation ──────────────────────────
-  const [clearAllModal, setClearAllModal] = useState(false);
-
-  // ─── NEW STATE: Shipment search/filter ──────────────────────────
-  const [shipmentSearchTerm, setShipmentSearchTerm] = useState('');
-
-  // ─── NEW STATE: Last saved timestamp ────────────────────────────
-  const [lastSaved, setLastSaved] = useState(null);
-  const [lastSavedDisplay, setLastSavedDisplay] = useState('');
-
-  // ─── TOAST HELPER ───────────────────────────────────────────────
-  const showToast = useCallback((message, type = 'success') => {
-    if (toastTimeout.current) clearTimeout(toastTimeout.current);
-    setToastMessage({ message, type });
-    toastTimeout.current = setTimeout(() => setToastMessage(null), 3500);
-  }, []);
-
-  // ─── LOCAL STORAGE PERSISTENCE ──────────────────────────────────
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('containerOptimizer');
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.shipment) setShipment(data.shipment);
-        if (data.containers) setContainers(data.containers);
-        if (data.containerNames) setContainerNames(data.containerNames);
-        if (data.capacity) setCapacity(data.capacity);
-        if (data.catalog) setCatalog(data.catalog);
-        if (data.catalogSources) setCatalogSources(data.catalogSources);
-        if (data.lastSaved) setLastSaved(new Date(data.lastSaved));
-      }
-    } catch (e) {
-      console.warn('Could not load saved state:', e);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      const now = new Date();
-      localStorage.setItem('containerOptimizer', JSON.stringify({
-        shipment, containers, containerNames, capacity, catalog, catalogSources, lastSaved: now.toISOString()
-      }));
-      setLastSaved(now);
-    } catch (e) {
-      console.warn('Could not save state:', e);
-    }
-  }, [shipment, containers, containerNames, capacity, catalog, catalogSources]);
-
-  // ─── LAST SAVED DISPLAY TIMER ──────────────────────────────────
-  useEffect(() => {
-    const updateDisplay = () => {
-      if (!lastSaved) { setLastSavedDisplay(''); return; }
-      const diff = Math.floor((Date.now() - lastSaved.getTime()) / 1000);
-      if (diff < 5) setLastSavedDisplay('Just now');
-      else if (diff < 60) setLastSavedDisplay(`${diff}s ago`);
-      else if (diff < 3600) setLastSavedDisplay(`${Math.floor(diff / 60)}m ago`);
-      else setLastSavedDisplay(`${Math.floor(diff / 3600)}h ago`);
-    };
-    updateDisplay();
-    const interval = setInterval(updateDisplay, 10000);
-    return () => clearInterval(interval);
-  }, [lastSaved]);
 
   // ─── XLSX PARSING ───────────────────────────────────────────────
   const extractXlsxData = async (file) => {
@@ -268,19 +179,14 @@ const ContainerOptimizer = () => {
         totalPrice: (catalogProduct.pricePerPcs || 0) * qty * catalogProduct.pcsPerCtn
       }]);
     }
-    showToast(`Added ${qty} CTN of "${catalogProduct.markNo}" to shipment`);
   };
 
   const updateShipmentCtn = (id, newCtn) => {
-    // Allow empty field while user is typing — don't remove the product
-    if (newCtn === '' || newCtn === null || newCtn === undefined) {
-      setShipment(shipment.map(s =>
-        s.id === id ? { ...s, ctn: '' } : s
-      ));
+    const ctn = parseInt(newCtn) || 0;
+    if (ctn <= 0) {
+      removeFromShipment(id);
       return;
     }
-    const ctn = parseInt(newCtn);
-    if (isNaN(ctn) || ctn <= 0) return;
     setShipment(shipment.map(s =>
       s.id === id
         ? {
@@ -298,296 +204,7 @@ const ContainerOptimizer = () => {
 
   const removeFromShipment = (id) => {
     setShipment(shipment.filter(s => s.id !== id));
-    showToast('Product removed from shipment');
   };
-
-  // ─── DUPLICATE PRODUCT IN SHIPMENT ──────────────────────────────
-  const duplicateShipmentProduct = (item) => {
-    // Auto-increment: try to parse markNo and bump suffix
-    let newMarkNo = item.markNo;
-    const match = item.markNo.match(/^(.+?)(\d+)$/);
-    if (match) {
-      const prefix = match[1];
-      const num = parseInt(match[2]) + 1;
-      newMarkNo = `${prefix}${num}`;
-    } else {
-      newMarkNo = item.markNo + '-copy';
-    }
-    const dup = {
-      ...item,
-      id: Date.now() + Math.random(),
-      catalogId: `dup-${Date.now()}`,
-      markNo: newMarkNo
-    };
-    setShipment(prev => [...prev, dup]);
-    showToast(`Duplicated "${item.markNo}" → "${newMarkNo}"`);
-  };
-
-  // ─── CLEAR ALL ──────────────────────────────────────────────────
-  const executeClearAll = () => {
-    setShipment([]);
-    setContainers([]);
-    setClearAllModal(false);
-    showToast('All shipment products and containers cleared');
-  };
-
-  // ─── COPY CONTAINER INFO ───────────────────────────────────────
-  const copyContainerInfo = async (container) => {
-    const name = containerNames[container.id] || `Container #${container.id}`;
-    const weightPct = maxWeight > 0 ? (container.totalGW / maxWeight * 100).toFixed(1) : '0';
-    const cbmPct = maxCbm > 0 ? (container.totalCBM / maxCbm * 100).toFixed(1) : '0';
-    const text = [
-      `📦 ${name}`,
-      `Cartons: ${container.totalCartons}`,
-      `T/QTY: ${container.totalQty || 0}`,
-      `G.W.: ${container.totalGW.toFixed(2)} kg (${weightPct}%)`,
-      `N.W.: ${container.totalNW.toFixed(2)} kg`,
-      `CBM: ${container.totalCBM.toFixed(2)} m³ (${cbmPct}%)`,
-      `Total Price: ¥${(container.totalPrice || 0).toFixed(2)}`,
-      `Products: ${Object.keys((() => { const g = {}; container.items.forEach(i => { g[i.markNo + '|' + i.description] = true; }); return g; })()).length} SKUs`
-    ].join('\\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast('Container info copied to clipboard!');
-    } catch {
-      showToast('Failed to copy to clipboard', 'error');
-    }
-  };
-
-  // ─── CONTAINER COLOR BORDER ─────────────────────────────────────
-  const getContainerBorderColor = (container) => {
-    const weightPct = maxWeight > 0 ? (container.totalGW / maxWeight * 100) : 0;
-    const cbmPct = maxCbm > 0 ? (container.totalCBM / maxCbm * 100) : 0;
-    const maxPct = Math.max(weightPct, cbmPct);
-    if (maxPct > 100) return 'border-blue-500';
-    if (maxPct >= 95) return 'border-yellow-500';
-    if (maxPct >= 80) return 'border-green-500';
-    if (maxPct >= 70) return 'border-slate-300';
-    return 'border-red-400';
-  };
-
-  // ─── SORTING ────────────────────────────────────────────────────
-  const handleSort = (key) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  };
-
-  const sortedShipment = useMemo(() => {
-    if (!sortConfig.key) return shipment;
-    const sorted = [...shipment].sort((a, b) => {
-      let valA, valB;
-      switch (sortConfig.key) {
-        case 'markNo':
-          valA = a.markNo.toLowerCase();
-          valB = b.markNo.toLowerCase();
-          return sortConfig.direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        case 'description':
-          valA = a.description.toLowerCase();
-          valB = b.description.toLowerCase();
-          return sortConfig.direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        case 'ctn':
-          valA = a.ctn; valB = b.ctn; break;
-        case 'pcsPerCtn':
-          valA = a.pcsPerCtn; valB = b.pcsPerCtn; break;
-        case 'totalQty':
-          valA = a.totalQty; valB = b.totalQty; break;
-        case 'totalGW':
-          valA = a.totalGW; valB = b.totalGW; break;
-        case 'totalNW':
-          valA = a.totalNW; valB = b.totalNW; break;
-        case 'totalCBM':
-          valA = a.totalCBM; valB = b.totalCBM; break;
-        default: return 0;
-      }
-      if (valA === undefined) return 0;
-      return sortConfig.direction === 'asc' ? valA - valB : valB - valA;
-    });
-    return sorted;
-  }, [shipment, sortConfig]);
-
-  // ─── SHIPMENT SEARCH FILTER ─────────────────────────────────────
-  const filteredSortedShipment = useMemo(() => {
-    let list = sortedShipment;
-    if (shipmentSearchTerm.trim()) {
-      const term = shipmentSearchTerm.toLowerCase();
-      list = list.filter(s =>
-        s.markNo.toLowerCase().includes(term) ||
-        s.description.toLowerCase().includes(term)
-      );
-    }
-    return list;
-  }, [sortedShipment, shipmentSearchTerm]);
-
-  const SortHeader = ({ label, sortKey, className = '' }) => {
-    const isActive = sortConfig.key === sortKey;
-    return (
-      <th
-        className={`px-3 py-2 text-left font-bold border-b cursor-pointer hover:bg-green-100 select-none transition ${className} ${isActive ? 'bg-green-100 text-green-800' : ''}`}
-        onClick={() => handleSort(sortKey)}
-      >
-        <div className="flex items-center gap-1">
-          {label}
-          {isActive ? (
-            sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
-          ) : (
-            <ArrowUpDown className="w-3 h-3 text-gray-400" />
-          )}
-        </div>
-      </th>
-    );
-  };
-
-  // ─── DELETE CONTAINER ───────────────────────────────────────────
-  const confirmDeleteContainer = (containerId) => {
-    setDeleteModal({ show: true, containerId });
-  };
-
-  const executeDeleteContainer = () => {
-    const { containerId } = deleteModal;
-    const containerToDelete = containers.find(c => c.id === containerId);
-    if (containerToDelete) {
-      setDeletedContainers(prev => [...prev, containerToDelete]);
-      setContainers(prev => prev.filter(c => c.id !== containerId));
-      showToast(`Container #${containerNames[containerId] || containerId} deleted successfully. Products are marked as shipped.`);
-    }
-    setDeleteModal({ show: false, containerId: null });
-  };
-
-  const undoDeleteContainer = () => {
-    if (deletedContainers.length === 0) return;
-    const last = deletedContainers[deletedContainers.length - 1];
-    setDeletedContainers(prev => prev.slice(0, -1));
-    setContainers(prev => [...prev, last].sort((a, b) => a.id - b.id));
-    showToast(`Container #${containerNames[last.id] || last.id} restored.`);
-  };
-
-  // ─── ADD EMPTY CONTAINER ────────────────────────────────────────
-  const addEmptyContainer = () => {
-    const maxId = containers.length > 0 ? Math.max(...containers.map(c => c.id)) : 0;
-    const newContainer = {
-      id: maxId + 1,
-      items: [],
-      totalGW: 0, totalNW: 0, totalCBM: 0, totalCartons: 0, totalPrice: 0, totalQty: 0
-    };
-    setContainers(prev => [...prev, newContainer]);
-    showToast(`Empty Container #${maxId + 1} created. Add products from the shipment list.`);
-  };
-
-  // ─── ADD PRODUCT TO CONTAINER (from shipment) ──────────────────
-  const addProductToContainer = (containerId, shipmentItem, ctnCount) => {
-    const qty = Math.min(parseInt(ctnCount) || 1, shipmentItem.ctn);
-    if (qty <= 0) return;
-
-    setContainers(prev => {
-      const updated = prev.map(c => ({ ...c, items: [...c.items] }));
-      const idx = updated.findIndex(c => c.id === containerId);
-      if (idx === -1) return prev;
-
-      // Check limits
-      const addedWeight = shipmentItem.gwPerCtn * qty;
-      const addedCBM = shipmentItem.cbmPerCtn * qty;
-      if (updated[idx].totalGW + addedWeight > maxWeight) {
-        showToast(`Cannot add: would exceed weight limit (${maxWeight} kg)`, 'error');
-        return prev;
-      }
-      if (updated[idx].totalCBM + addedCBM > maxCbm) {
-        showToast(`Cannot add: would exceed volume limit (${maxCbm} m³)`, 'error');
-        return prev;
-      }
-
-      // Add individual cartons as items
-      for (let i = 0; i < qty; i++) {
-        updated[idx].items.push({
-          ...shipmentItem,
-          singleCtnGW: shipmentItem.gwPerCtn,
-          singleCtnNW: shipmentItem.nwPerCtn,
-          singleCtnCBM: shipmentItem.cbmPerCtn
-        });
-      }
-      updated[idx] = recalcContainerTotals(updated[idx]);
-      return updated;
-    });
-    showToast(`Added ${qty} CTN of ${shipmentItem.markNo} to Container #${containerNames[containerId] || containerId}`);
-  };
-
-  // ─── CONTAINER RENAMING ─────────────────────────────────────────
-  const startRenamingContainer = (containerId) => {
-    setEditingContainerName(containerId);
-    setTempContainerName(containerNames[containerId] || `Container ${containerId}`);
-  };
-
-  const saveContainerName = (containerId) => {
-    setContainerNames(prev => ({ ...prev, [containerId]: tempContainerName.trim() || `Container ${containerId}` }));
-    setEditingContainerName(null);
-    showToast('Container renamed successfully');
-  };
-
-  // ─── EXPORT SINGLE CONTAINER CSV ───────────────────────────────
-  const exportContainerCSV = useCallback((container) => {
-    const groupedItems = {};
-    const groupOrder = [];
-    container.items.forEach(item => {
-      const key = item.markNo + '|' + item.description;
-      if (!groupedItems[key]) {
-        groupedItems[key] = {
-          count: 0, markNo: item.markNo, description: item.description,
-          pcsPerCtn: item.pcsPerCtn, gwPerCtn: item.gwPerCtn,
-          nwPerCtn: item.nwPerCtn, cbmPerCtn: item.cbmPerCtn,
-          pricePerPcs: item.pricePerPcs || 0
-        };
-        groupOrder.push(key);
-      }
-      groupedItems[key].count++;
-    });
-
-    const headers = ['No', 'MARKS&NO', 'DESCRIPTION', 'CTN', 'PCS/CTN', 'UNIT', 'T/QTY', 'U/PRICE', 'AMOUNT', 'G.W.(KGS)', 'N.W.(KGS)', 'CBM'];
-    const rows = [headers.join(',')];
-    let idx = 0;
-    for (const key of groupOrder) {
-      const data = groupedItems[key];
-      idx++;
-      const totalQty = data.count * data.pcsPerCtn;
-      const amount = data.pricePerPcs * totalQty;
-      rows.push([
-        idx,
-        `"${data.markNo}"`,
-        `"${data.description.replace(/"/g, '""')}"`,
-        data.count,
-        data.pcsPerCtn,
-        'PCS',
-        totalQty,
-        data.pricePerPcs.toFixed(2),
-        amount.toFixed(2),
-        (data.gwPerCtn * data.count).toFixed(2),
-        (data.nwPerCtn * data.count).toFixed(2),
-        (data.cbmPerCtn * data.count).toFixed(4)
-      ].join(','));
-    }
-    // Total row
-    rows.push([
-      '', '', 'TOTAL', container.totalCartons, '', '', container.totalQty || '',
-      '', (container.totalPrice || 0).toFixed(2),
-      container.totalGW.toFixed(2), container.totalNW.toFixed(2), container.totalCBM.toFixed(2)
-    ].join(','));
-
-    const csvContent = rows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `container_${container.id}_packing_list.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    showToast(`CSV exported for Container #${containerNames[container.id] || container.id}`);
-  }, [containerNames, showToast]);
-
-  // ─── EXPORT ALL CSV ─────────────────────────────────────────────
-  const exportAllCSV = useCallback(() => {
-    containers.forEach(container => exportContainerCSV(container));
-    showToast(`Exported CSV for all ${containers.length} containers`);
-  }, [containers, exportContainerCSV, showToast]);
 
   // ─── MANUAL ADD ─────────────────────────────────────────────────
   const handlePhotoUpload = (e) => {
@@ -624,60 +241,53 @@ const ContainerOptimizer = () => {
     };
     setCatalog(prev => [...prev, catProduct]);
     setNewProduct({ markNo: '', description: '', photo: '', pcsPerCtn: '', gwPerCtn: '', nwPerCtn: '', cbmPerCtn: '', pricePerPcs: '' });
-    showToast(`Product "${catProduct.description}" added to catalog`);
   };
 
   // ─── CONTAINER OPTIMIZATION ─────────────────────────────────────
   const optimizeContainers = () => {
-    setIsGenerating(true);
-    // Use setTimeout to allow the loading UI to render before crunching
-    setTimeout(() => {
-      const expandedProducts = [];
-      shipment.forEach(product => {
-        for (let i = 0; i < product.ctn; i++) {
-          expandedProducts.push({
-            ...product,
-            singleCtnGW: product.gwPerCtn,
-            singleCtnNW: product.nwPerCtn,
-            singleCtnCBM: product.cbmPerCtn
-          });
-        }
-      });
+    const expandedProducts = [];
+    shipment.forEach(product => {
+      for (let i = 0; i < product.ctn; i++) {
+        expandedProducts.push({
+          ...product,
+          singleCtnGW: product.gwPerCtn,
+          singleCtnNW: product.nwPerCtn,
+          singleCtnCBM: product.cbmPerCtn
+        });
+      }
+    });
 
-      expandedProducts.sort((a, b) => b.singleCtnGW - a.singleCtnGW);
+    expandedProducts.sort((a, b) => b.singleCtnGW - a.singleCtnGW);
 
-      const newContainers = [];
-      let currentContainer = { id: 1, items: [], totalGW: 0, totalNW: 0, totalCBM: 0, totalCartons: 0, totalPrice: 0, totalQty: 0 };
+    const newContainers = [];
+    let currentContainer = { id: 1, items: [], totalGW: 0, totalNW: 0, totalCBM: 0, totalCartons: 0, totalPrice: 0, totalQty: 0 };
 
-      expandedProducts.forEach(product => {
-        if (currentContainer.totalGW + product.singleCtnGW <= maxWeight &&
-          currentContainer.totalCBM + product.singleCtnCBM <= maxCbm) {
-          currentContainer.items.push(product);
-          currentContainer.totalGW += product.singleCtnGW;
-          currentContainer.totalNW += product.singleCtnNW;
-          currentContainer.totalCBM += product.singleCtnCBM;
-          currentContainer.totalCartons += 1;
-          currentContainer.totalPrice += (product.pricePerPcs || 0) * product.pcsPerCtn;
-          currentContainer.totalQty += product.pcsPerCtn;
-        } else {
-          if (currentContainer.items.length > 0) newContainers.push(currentContainer);
-          currentContainer = {
-            id: newContainers.length + 2,
-            items: [product],
-            totalGW: product.singleCtnGW,
-            totalNW: product.singleCtnNW,
-            totalCBM: product.singleCtnCBM,
-            totalCartons: 1,
-            totalPrice: (product.pricePerPcs || 0) * product.pcsPerCtn,
-            totalQty: product.pcsPerCtn
-          };
-        }
-      });
-      if (currentContainer.items.length > 0) newContainers.push(currentContainer);
-      setContainers(newContainers);
-      setIsGenerating(false);
-      showToast(`Generated ${newContainers.length} container(s) with ${expandedProducts.length} cartons`);
-    }, 100);
+    expandedProducts.forEach(product => {
+      if (currentContainer.totalGW + product.singleCtnGW <= maxWeight &&
+        currentContainer.totalCBM + product.singleCtnCBM <= maxCbm) {
+        currentContainer.items.push(product);
+        currentContainer.totalGW += product.singleCtnGW;
+        currentContainer.totalNW += product.singleCtnNW;
+        currentContainer.totalCBM += product.singleCtnCBM;
+        currentContainer.totalCartons += 1;
+        currentContainer.totalPrice += (product.pricePerPcs || 0) * product.pcsPerCtn;
+        currentContainer.totalQty += product.pcsPerCtn;
+      } else {
+        if (currentContainer.items.length > 0) newContainers.push(currentContainer);
+        currentContainer = {
+          id: newContainers.length + 2,
+          items: [product],
+          totalGW: product.singleCtnGW,
+          totalNW: product.singleCtnNW,
+          totalCBM: product.singleCtnCBM,
+          totalCartons: 1,
+          totalPrice: (product.pricePerPcs || 0) * product.pcsPerCtn,
+          totalQty: product.pcsPerCtn
+        };
+      }
+    });
+    if (currentContainer.items.length > 0) newContainers.push(currentContainer);
+    setContainers(newContainers);
   };
 
   // ─── CONTAINER MODIFICATION ─────────────────────────────────────
@@ -865,7 +475,6 @@ const ContainerOptimizer = () => {
         parseFloat((data.cbmPerCtn * data.count).toFixed(4))
       ]);
       row.height = ROW_HEIGHT;
-      // eslint-disable-next-line no-loop-func
       row.eachCell((cell, colNumber) => {
         cell.border = thinBorder;
         cell.alignment = { vertical: 'middle', horizontal: colNumber <= 2 ? 'center' : (colNumber >= 5 ? 'center' : 'left') };
@@ -997,11 +606,6 @@ const ContainerOptimizer = () => {
           <div className="flex items-center gap-3 mb-2">
             <FileSpreadsheet className="w-8 h-8 text-blue-600" />
             <h1 className="text-2xl font-bold text-gray-800">Container Packing List Generator</h1>
-            {lastSavedDisplay && (
-              <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400">
-                <Clock className="w-3.5 h-3.5" /> Saved: {lastSavedDisplay}
-              </span>
-            )}
           </div>
           <div className="flex flex-wrap gap-4 items-center text-sm">
             <div className="flex items-center gap-2">
@@ -1023,48 +627,6 @@ const ContainerOptimizer = () => {
             </div>
           </div>
         </div>
-
-        {/* STATS DASHBOARD */}
-        {shipment.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-4 mb-4">
-            <div className="flex items-center gap-2 mb-3">
-              <BarChart3 className="w-5 h-5 text-blue-600" />
-              <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Shipment Overview</h2>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
-              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                <p className="text-xs text-gray-500">Products</p>
-                <p className="text-xl font-bold text-blue-700">{shipment.length}</p>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-lg border">
-                <p className="text-xs text-gray-500">Total Cartons</p>
-                <p className="text-xl font-bold text-slate-800">{shipmentTotals.ctn}</p>
-              </div>
-              <div className="bg-green-50 p-3 rounded-lg border border-green-200">
-                <p className="text-xs text-gray-500">Total G.W.</p>
-                <p className="text-xl font-bold text-green-700">{shipmentTotals.gw.toFixed(1)} kg</p>
-              </div>
-              <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
-                <p className="text-xs text-gray-500">Total N.W.</p>
-                <p className="text-xl font-bold text-purple-700">{shipmentTotals.nw.toFixed(1)} kg</p>
-              </div>
-              <div className="bg-orange-50 p-3 rounded-lg border border-orange-200">
-                <p className="text-xs text-gray-500">Total CBM</p>
-                <p className="text-xl font-bold text-orange-700">{shipmentTotals.cbm.toFixed(2)} m³</p>
-              </div>
-              <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-                <p className="text-xs text-gray-500">Total Value</p>
-                <p className="text-xl font-bold text-yellow-700">¥{shipmentTotals.price.toFixed(0)}</p>
-              </div>
-              <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
-                <p className="text-xs text-gray-500">Est. Containers</p>
-                <p className="text-xl font-bold text-indigo-700">
-                  ~{Math.ceil(Math.max(shipmentTotals.gw / (maxWeight || 1), shipmentTotals.cbm / (maxCbm || 1)))}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* CATALOG SECTION */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
@@ -1132,8 +694,7 @@ const ContainerOptimizer = () => {
                           <tr key={product.id} className={`border-b hover:bg-blue-50 transition ${inShipment ? 'bg-green-50' : ''}`}>
                             <td className="px-3 py-2">
                               {product.photo ? (
-                                <img src={product.photo} alt="" className="w-12 h-12 object-cover rounded border cursor-pointer hover:opacity-80 transition"
-                                  onClick={() => setPhotoModal({ show: true, src: product.photo, alt: product.description })} />
+                                <img src={product.photo} alt="" className="w-12 h-12 object-cover rounded border" />
                               ) : (
                                 <div className="w-12 h-12 bg-gray-100 rounded border flex items-center justify-center">
                                   <Image className="w-4 h-4 text-gray-300" />
@@ -1242,78 +803,46 @@ const ContainerOptimizer = () => {
         {/* SHIPMENT LIST */}
         {shipment.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                 <ShoppingCart className="w-6 h-6 text-green-600" />
-                Shipment List
-                <span className="bg-green-600 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">{shipment.length} Products</span>
-                <span className="text-sm font-normal text-gray-500">({shipmentTotals.ctn} CTN)</span>
+                Shipment List ({shipment.length} products, {shipmentTotals.ctn} CTN)
               </h2>
-              <div className="flex items-center gap-2">
-                <div className="flex gap-2 text-xs flex-wrap">
-                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded">G.W: {shipmentTotals.gw.toFixed(1)} kg</span>
-                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">CBM: {shipmentTotals.cbm.toFixed(2)} m³</span>
-                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded">¥{shipmentTotals.price.toFixed(2)}</span>
-                  <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded">
-                    ~{Math.ceil(Math.max(shipmentTotals.gw / (maxWeight || 1), shipmentTotals.cbm / (maxCbm || 1)))} container(s)
-                  </span>
-                </div>
-                <button onClick={() => setClearAllModal(true)}
-                  className="bg-red-50 text-red-600 px-3 py-1.5 rounded border border-red-200 hover:bg-red-100 transition text-xs font-medium flex items-center gap-1.5"
-                  title="Clear all products and containers">
-                  <Trash2 className="w-3.5 h-3.5" /> Clear All
-                </button>
+              <div className="flex gap-2 text-xs">
+                <span className="bg-green-100 text-green-800 px-2 py-1 rounded">G.W: {shipmentTotals.gw.toFixed(1)} kg</span>
+                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">CBM: {shipmentTotals.cbm.toFixed(2)} m³</span>
+                <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded">¥{shipmentTotals.price.toFixed(2)}</span>
+                <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded">
+                  ~{Math.ceil(Math.max(shipmentTotals.gw / (maxWeight || 1), shipmentTotals.cbm / (maxCbm || 1)))} container(s)
+                </span>
               </div>
-            </div>
-
-            {/* Shipment Search Bar */}
-            <div className="relative mb-3">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Filter shipment by MARKS&NO or description..."
-                value={shipmentSearchTerm}
-                onChange={(e) => setShipmentSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-20 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
-              />
-              {shipmentSearchTerm && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                  <span className="text-xs text-gray-500">{filteredSortedShipment.length} of {shipment.length}</span>
-                  <button onClick={() => setShipmentSearchTerm('')} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
             </div>
 
             <div className="border rounded-lg overflow-x-auto mb-4">
               <table className="w-full text-sm">
                 <thead className="bg-green-50">
                   <tr>
-                    <th className="px-2 py-2 text-center font-bold border-b w-10">#</th>
                     <th className="px-3 py-2 text-left font-bold border-b">Photo</th>
-                    <SortHeader label="Mark No" sortKey="markNo" />
-                    <SortHeader label="Description" sortKey="description" />
-                    <SortHeader label="CTN" sortKey="ctn" />
-                    <SortHeader label="PCS/CTN" sortKey="pcsPerCtn" />
-                    <SortHeader label="T/QTY" sortKey="totalQty" />
+                    <th className="px-3 py-2 text-left font-bold border-b">Mark No</th>
+                    <th className="px-3 py-2 text-left font-bold border-b">Description</th>
+                    <th className="px-3 py-2 text-left font-bold border-b">CTN</th>
+                    <th className="px-3 py-2 text-left font-bold border-b">PCS/CTN</th>
+                    <th className="px-3 py-2 text-left font-bold border-b">T/QTY</th>
                     <th className="px-3 py-2 text-left font-bold border-b">U/Price</th>
                     <th className="px-3 py-2 text-left font-bold border-b">Amount</th>
-                    <SortHeader label="G.W." sortKey="totalGW" />
-                    <SortHeader label="N.W." sortKey="totalNW" />
-                    <SortHeader label="CBM" sortKey="totalCBM" />
+                    <th className="px-3 py-2 text-left font-bold border-b">G.W.</th>
+                    <th className="px-3 py-2 text-left font-bold border-b">N.W.</th>
+                    <th className="px-3 py-2 text-left font-bold border-b">CBM</th>
                     <th className="px-3 py-2 text-left font-bold border-b">Source</th>
-                    <th className="px-3 py-2 text-center font-bold border-b">Actions</th>
+                    <th className="px-3 py-2 text-left font-bold border-b"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSortedShipment.map((item, rowIndex) => (
+                  {shipment.map((item) => (
                     <tr key={item.id} className="border-b hover:bg-gray-50">
-                      <td className="px-2 py-2 text-center text-xs text-gray-400 font-mono">{rowIndex + 1}</td>
                       <td className="px-3 py-2">
                         {item.photo ? (
-                          <img src={item.photo} alt="" className="w-10 h-10 object-cover rounded border cursor-pointer hover:opacity-80 transition"
-                            onClick={() => setPhotoModal({ show: true, src: item.photo, alt: item.description })} />
+                          <img src={item.photo} alt="" className="w-10 h-10 object-cover rounded border" />
                         ) : (
                           <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center">
                             <Image className="w-3 h-3 text-gray-300" />
@@ -1340,14 +869,9 @@ const ContainerOptimizer = () => {
                       <td className="px-3 py-2">{item.totalCBM.toFixed(4)}</td>
                       <td className="px-3 py-2 text-xs text-gray-400 max-w-20 truncate">{item.source}</td>
                       <td className="px-3 py-2">
-                        <div className="flex items-center gap-1 justify-center">
-                          <button onClick={() => duplicateShipmentProduct(item)} className="text-blue-500 hover:text-blue-700 p-0.5" title="Duplicate product">
-                            <Copy className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => removeFromShipment(item.id)} className="text-red-500 hover:text-red-700 p-0.5" title="Remove product">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button onClick={() => removeFromShipment(item.id)} className="text-red-500 hover:text-red-700">
+                          <X className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -1357,18 +881,9 @@ const ContainerOptimizer = () => {
 
             <button
               onClick={optimizeContainers}
-              disabled={isGenerating}
-              className={`text-white px-8 py-3 rounded-lg transition font-semibold text-lg w-full flex items-center justify-center gap-3 ${
-                isGenerating ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
-              }`}
+              className="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-lg w-full"
             >
-              {isGenerating ? (
-                <>
-                  <Loader className="w-5 h-5 animate-spin" /> Generating Loading Plan...
-                </>
-              ) : (
-                'Generate Container Loading Plan'
-              )}
+              Generate Container Loading Plan
             </button>
           </div>
         )}
@@ -1376,30 +891,14 @@ const ContainerOptimizer = () => {
         {/* CONTAINER RESULTS */}
         {containers.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
-            <div className="flex flex-wrap justify-between items-center mb-4 gap-2">
+            <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-gray-800">
                 Packing List: {containers.length} Container{containers.length > 1 ? 's' : ''}
               </h2>
-              <div className="flex flex-wrap gap-2">
-                {deletedContainers.length > 0 && (
-                  <button onClick={undoDeleteContainer}
-                    className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition flex items-center gap-2 text-sm">
-                    <Undo2 className="w-4 h-4" /> Undo Delete
-                  </button>
-                )}
-                <button onClick={addEmptyContainer}
-                  className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition flex items-center gap-2 text-sm">
-                  <PlusCircle className="w-4 h-4" /> Add Empty Container
-                </button>
-                <button onClick={exportAllCSV}
-                  className="bg-teal-600 text-white px-4 py-2 rounded hover:bg-teal-700 transition flex items-center gap-2 text-sm">
-                  <FileText className="w-4 h-4" /> Export All CSV
-                </button>
-                <button onClick={exportToXlsx}
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition flex items-center gap-2 text-sm">
-                  <Download className="w-4 h-4" /> Export All XLSX
-                </button>
-              </div>
+              <button onClick={exportToXlsx}
+                className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition flex items-center gap-2">
+                <Download className="w-4 h-4" /> Export All XLSX
+              </button>
             </div>
 
             {/* ── Grand Totals ── */}
@@ -1444,77 +943,17 @@ const ContainerOptimizer = () => {
               });
 
               return (
-                <div key={container.id} className={`border-2 rounded-lg p-5 mb-4 shadow-sm ${getContainerBorderColor(container)}`}>
-                  <div className="flex items-center justify-between bg-slate-100 p-3 rounded mb-3 gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      {editingContainerName === container.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={tempContainerName}
-                            onChange={(e) => setTempContainerName(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') saveContainerName(container.id); if (e.key === 'Escape') setEditingContainerName(null); }}
-                            className="px-2 py-1 border rounded text-sm font-bold"
-                            autoFocus
-                          />
-                          <button onClick={() => saveContainerName(container.id)} className="text-green-600 hover:text-green-800">
-                            <CheckCircle className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => setEditingContainerName(null)} className="text-gray-400 hover:text-gray-600">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <h3 className="text-lg font-bold text-gray-800">
-                            {containerNames[container.id] || `CONTAINER #${container.id}`}
-                          </h3>
-                          <button onClick={() => startRenamingContainer(container.id)}
-                            className="text-gray-400 hover:text-blue-600 transition" title="Rename container">
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                          {/* Utilization badge */}
-                          {(() => {
-                            const mp = Math.max(weightPercent, cbmPercent);
-                            const label = mp > 100 ? 'Over' : mp >= 95 ? 'Near Full' : mp >= 80 ? 'Optimal' : mp >= 70 ? 'Moderate' : 'Low';
-                            const cls = mp > 100 ? 'bg-blue-100 text-blue-700' : mp >= 95 ? 'bg-yellow-100 text-yellow-700' : mp >= 80 ? 'bg-green-100 text-green-700' : mp >= 70 ? 'bg-slate-100 text-slate-600' : 'bg-red-100 text-red-600';
-                            return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{mp.toFixed(0)}% — {label}</span>;
-                          })()}
-                        </>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => setAddToContainerModal({ show: true, containerId: container.id })}
-                        className="bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 transition flex items-center gap-1.5 text-sm"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add Products
-                      </button>
-                      <button
-                        onClick={() => copyContainerInfo(container)}
-                        className="bg-gray-600 text-white px-3 py-1.5 rounded hover:bg-gray-700 transition flex items-center gap-1.5 text-sm"
-                      >
-                        <Copy className="w-3.5 h-3.5" /> Copy Info
-                      </button>
-                      <button
-                        onClick={() => exportContainerCSV(container)}
-                        className="bg-teal-600 text-white px-3 py-1.5 rounded hover:bg-teal-700 transition flex items-center gap-1.5 text-sm"
-                      >
-                        <FileText className="w-3.5 h-3.5" /> CSV
-                      </button>
-                      <button
-                        onClick={() => exportSingleContainer(container)}
-                        className="bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 transition flex items-center gap-1.5 text-sm"
-                      >
-                        <Download className="w-3.5 h-3.5" /> XLSX
-                      </button>
-                      <button
-                        onClick={() => confirmDeleteContainer(container.id)}
-                        className="bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 transition flex items-center gap-1.5 text-sm"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Delete
-                      </button>
-                    </div>
+                <div key={container.id} className="border-2 rounded-lg p-5 mb-4 shadow-sm">
+                  <div className="flex items-center justify-between bg-slate-100 p-3 rounded mb-3">
+                    <h3 className="text-lg font-bold text-gray-800">
+                      CONTAINER #{container.id}
+                    </h3>
+                    <button
+                      onClick={() => exportSingleContainer(container)}
+                      className="bg-indigo-600 text-white px-4 py-1.5 rounded hover:bg-indigo-700 transition flex items-center gap-2 text-sm"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download This Container
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3 text-sm">
@@ -1588,8 +1027,7 @@ const ContainerOptimizer = () => {
                             <tr key={idx} className="border-b">
                               <td className="px-3 py-2">
                                 {data.photo ? (
-                                  <img src={data.photo} alt="" className="w-10 h-10 object-cover rounded border cursor-pointer hover:opacity-80 transition"
-                                    onClick={() => setPhotoModal({ show: true, src: data.photo, alt: data.description })} />
+                                  <img src={data.photo} alt="" className="w-10 h-10 object-cover rounded border" />
                                 ) : (
                                   <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center">
                                     <Image className="w-3 h-3 text-gray-300" />
@@ -1660,195 +1098,6 @@ const ContainerOptimizer = () => {
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {/* SHOW ADD EMPTY CONTAINER BUTTON WHEN NO CONTAINERS */}
-        {containers.length === 0 && shipment.length > 0 && (
-          <div className="text-center py-4">
-            <button onClick={addEmptyContainer}
-              className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-sm inline-flex items-center gap-2">
-              <PlusCircle className="w-5 h-5" /> Create Empty Container Manually
-            </button>
-          </div>
-        )}
-
-        {/* ── TOAST NOTIFICATION ── */}
-        {toastMessage && (
-          <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all animate-fade-in ${
-            toastMessage.type === 'error' ? 'bg-red-600' : 'bg-green-600'
-          }`}>
-            {toastMessage.type === 'error' ? (
-              <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-            ) : (
-              <CheckCircle className="w-5 h-5 flex-shrink-0" />
-            )}
-            {toastMessage.message}
-            <button onClick={() => setToastMessage(null)} className="ml-2 hover:opacity-80">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* ── DELETE CONFIRMATION MODAL ── */}
-        {deleteModal.show && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setDeleteModal({ show: false, containerId: null })}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <Trash2 className="w-5 h-5 text-red-600" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800">Delete Container</h3>
-              </div>
-              <p className="text-gray-600 mb-2">
-                Are you sure you want to delete <strong>{containerNames[deleteModal.containerId] || `Container #${deleteModal.containerId}`}</strong>?
-              </p>
-              <p className="text-sm text-gray-500 mb-6">
-                The products in this container will be considered as shipped and will <strong>not</strong> return to the shipment list. You can undo this action.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setDeleteModal({ show: false, containerId: null })}
-                  className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50 transition text-sm font-medium">
-                  Cancel
-                </button>
-                <button onClick={executeDeleteContainer}
-                  className="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition text-sm font-medium flex items-center gap-2">
-                  <Trash2 className="w-4 h-4" /> Delete Container
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── ADD PRODUCTS TO CONTAINER MODAL ── */}
-        {addToContainerModal.show && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setAddToContainerModal({ show: false, containerId: null }); setAddToContainerCtn({}); }}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                  <Plus className="w-5 h-5 text-green-600" />
-                  Add Products to {containerNames[addToContainerModal.containerId] || `Container #${addToContainerModal.containerId}`}
-                </h3>
-                <button onClick={() => { setAddToContainerModal({ show: false, containerId: null }); setAddToContainerCtn({}); }}
-                  className="text-gray-400 hover:text-gray-600">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              {(() => {
-                const targetContainer = containers.find(c => c.id === addToContainerModal.containerId);
-                const remainWeight = maxWeight - (targetContainer?.totalGW || 0);
-                const remainCBM = maxCbm - (targetContainer?.totalCBM || 0);
-                return (
-                  <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
-                    <div className="bg-green-50 p-2 rounded border border-green-200">
-                      <span className="text-gray-600">Remaining Weight: </span>
-                      <span className="font-bold text-green-700">{remainWeight.toFixed(2)} kg</span>
-                    </div>
-                    <div className="bg-blue-50 p-2 rounded border border-blue-200">
-                      <span className="text-gray-600">Remaining Volume: </span>
-                      <span className="font-bold text-blue-700">{remainCBM.toFixed(4)} m³</span>
-                    </div>
-                  </div>
-                );
-              })()}
-              {shipment.length > 0 ? (
-                <div className="border rounded-lg overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-bold border-b">Mark No</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Description</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">In Shipment</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">G.W./CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">CBM/CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Add</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shipment.map(item => (
-                        <tr key={item.id} className="border-b hover:bg-blue-50 transition">
-                          <td className="px-3 py-2 font-mono text-xs">{item.markNo}</td>
-                          <td className="px-3 py-2 font-medium max-w-48 truncate">{item.description}</td>
-                          <td className="px-3 py-2">{item.ctn} CTN</td>
-                          <td className="px-3 py-2">{item.gwPerCtn} kg</td>
-                          <td className="px-3 py-2">{item.cbmPerCtn} m³</td>
-                          <td className="px-3 py-2">
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="1"
-                                max={item.ctn}
-                                placeholder="CTN"
-                                value={addToContainerCtn[item.id] || ''}
-                                onChange={(e) => setAddToContainerCtn(prev => ({ ...prev, [item.id]: e.target.value }))}
-                                className="w-16 px-2 py-1 border rounded text-center text-sm"
-                              />
-                              <button
-                                onClick={() => {
-                                  addProductToContainer(addToContainerModal.containerId, item, addToContainerCtn[item.id] || 1);
-                                  setAddToContainerCtn(prev => ({ ...prev, [item.id]: '' }));
-                                }}
-                                className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 transition text-xs"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-center py-6 text-gray-400">No products in shipment list. Add products to shipment first.</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── PHOTO ENLARGEMENT MODAL ── */}
-        {photoModal.show && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-8" onClick={() => setPhotoModal({ show: false, src: '', alt: '' })}>
-            <div className="relative max-w-3xl max-h-[85vh]" onClick={e => e.stopPropagation()}>
-              <button onClick={() => setPhotoModal({ show: false, src: '', alt: '' })}
-                className="absolute -top-3 -right-3 bg-white rounded-full p-1.5 shadow-lg text-gray-600 hover:text-gray-900 z-10">
-                <X className="w-5 h-5" />
-              </button>
-              <img src={photoModal.src} alt={photoModal.alt} className="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain bg-white" />
-              {photoModal.alt && (
-                <p className="text-center text-white text-sm mt-3 opacity-80">{photoModal.alt}</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── CLEAR ALL CONFIRMATION MODAL ── */}
-        {clearAllModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setClearAllModal(false)}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <Trash2 className="w-5 h-5 text-red-600" />
-                </div>
-                <h3 className="text-lg font-bold text-gray-800">Clear All Products</h3>
-              </div>
-              <p className="text-gray-600 mb-2">
-                Are you sure you want to remove <strong>all products</strong> from the shipment and <strong>all containers</strong>?
-              </p>
-              <p className="text-sm text-red-500 mb-6 font-medium">
-                This action cannot be undone.
-              </p>
-              <div className="flex justify-end gap-3">
-                <button onClick={() => setClearAllModal(false)}
-                  className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50 transition text-sm font-medium">
-                  Cancel
-                </button>
-                <button onClick={executeClearAll}
-                  className="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-700 transition text-sm font-medium flex items-center gap-2">
-                  <Trash2 className="w-4 h-4" /> Clear Everything
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
