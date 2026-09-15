@@ -3,6 +3,8 @@ import { Plus, Download, Image, FileSpreadsheet, Upload, Search, ShoppingCart, P
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import ExcelJS from 'exceljs';
+import { readProjects, saveProject, updateHistory } from './projectStorage';
+import { importPackingWorkbook, downloadProject, validateProject } from './packingProject';
 
 const ContainerOptimizer = () => {
   // Catalog: all products from uploaded XLSX files
@@ -65,6 +67,25 @@ const ContainerOptimizer = () => {
   // ─── NEW STATE: Last saved timestamp ────────────────────────────
   const [lastSaved, setLastSaved] = useState(null);
   const [lastSavedDisplay, setLastSavedDisplay] = useState('');
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageError, setStorageError] = useState('');
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [projectName, setProjectName] = useState('My shipment');
+  const [importing, setImporting] = useState(false);
+  const previousContainers = useRef(null);
+  const saveQueue = useRef(Promise.resolve());
+
+  const restoreProject = useCallback((data) => {
+    setShipment(data.shipment || []);
+    setContainers(data.containers || []);
+    setContainerNames(data.containerNames || {});
+    setCapacity(data.capacity || { maxWeight: 27000, maxCbm: 76 });
+    setCatalog(data.catalog || []);
+    setCatalogSources(data.catalogSources || []);
+    setProjectName(data.projectName || 'My shipment');
+    setDeletedContainers([]);
+  }, []);
 
   // ─── TOAST HELPER ───────────────────────────────────────────────
   const showToast = useCallback((message, type = 'success') => {
@@ -73,36 +94,69 @@ const ContainerOptimizer = () => {
     toastTimeout.current = setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
-  // ─── LOCAL STORAGE PERSISTENCE ──────────────────────────────────
+  // Hydrate before enabling saves so an empty initial render cannot overwrite data.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('containerOptimizer');
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.shipment) setShipment(data.shipment);
-        if (data.containers) setContainers(data.containers);
-        if (data.containerNames) setContainerNames(data.containerNames);
-        if (data.capacity) setCapacity(data.capacity);
-        if (data.catalog) setCatalog(data.catalog);
-        if (data.catalogSources) setCatalogSources(data.catalogSources);
-        if (data.lastSaved) setLastSaved(new Date(data.lastSaved));
-      }
-    } catch (e) {
-      console.warn('Could not load saved state:', e);
-    }
-  }, []);
+    let active = true;
+    readProjects().then(({ current, history: savedHistory }) => {
+      if (!active) return;
+      const legacy = !current && localStorage.getItem('containerOptimizer');
+      const data = current || (legacy ? JSON.parse(legacy) : null);
+      if (data) restoreProject(data);
+      setHistory(savedHistory.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      setStorageReady(true);
+    }).catch(error => {
+      if (active) setStorageError(`Could not open saved projects: ${error.message}. Reload to retry.`);
+    });
+    return () => { active = false; };
+  }, [restoreProject]);
 
   useEffect(() => {
-    try {
-      const now = new Date();
-      localStorage.setItem('containerOptimizer', JSON.stringify({
-        shipment, containers, containerNames, capacity, catalog, catalogSources, lastSaved: now.toISOString()
-      }));
+    if (!storageReady) return;
+    const now = new Date();
+    const current = { version: 1, shipment, containers, containerNames, capacity, catalog,
+      catalogSources, projectName, lastSaved: now.toISOString() };
+    const signature = JSON.stringify({ containers, containerNames, capacity });
+    const snapshot = containers.length && signature !== previousContainers.current
+      ? { id: window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: projectName, createdAt: now.toISOString(), project: current } : null;
+    previousContainers.current = signature;
+    setLastSavedDisplay('Saving...');
+    saveQueue.current = saveQueue.current.catch(() => {}).then(() => saveProject(current, snapshot)).then(() => {
+      if (snapshot) setHistory(prev => [snapshot, ...prev]);
       setLastSaved(now);
-    } catch (e) {
-      console.warn('Could not save state:', e);
-    }
-  }, [shipment, containers, containerNames, capacity, catalog, catalogSources]);
+      setStorageError('');
+    }).catch(error => {
+      previousContainers.current = null;
+      setStorageError(`Changes could not be saved: ${error.message}. Download a backup before closing.`);
+    });
+  }, [storageReady, shipment, containers, containerNames, capacity, catalog, catalogSources, projectName]);
+
+  const importProject = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error('Please use a file smaller than 20 MB.');
+      const data = file.name.toLowerCase().endsWith('.json')
+        ? validateProject(JSON.parse(await file.text()))
+        : await importPackingWorkbook(await file.arrayBuffer());
+      await saveQueue.current;
+      restoreProject({ ...data, projectName: data.projectName || file.name.replace(/\.[^.]+$/, '') });
+      showToast('Project opened. Excel totals were recalculated from the edited rows.');
+    } catch (error) { showToast(error.message, 'error'); }
+    finally { setImporting(false); }
+  };
+
+  const changeHistory = async (entry, remove = false) => {
+    if (remove && !window.confirm(`Delete saved history entry "${entry.name}"?`)) return;
+    const name = remove ? entry.name : window.prompt('History entry name', entry.name);
+    if (!name?.trim()) return;
+    const updated = { ...entry, name: name.trim() };
+    try {
+      await updateHistory(updated, remove);
+      setHistory(prev => remove ? prev.filter(x => x.id !== entry.id) : prev.map(x => x.id === entry.id ? updated : x));
+    } catch (error) { showToast(`History could not be updated: ${error.message}`, 'error'); }
+  };
 
   // ─── LAST SAVED DISPLAY TIMER ──────────────────────────────────
   useEffect(() => {
@@ -991,6 +1045,32 @@ const ContainerOptimizer = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
       <div className="max-w-7xl mx-auto">
+        {storageError && <p role="alert" className="bg-red-100 text-red-800 p-3 rounded mb-3">{storageError}</p>}
+        {!storageReady && <p role="status" className="p-3">Opening saved workspace...</p>}
+        <fieldset disabled={!storageReady || importing} className="min-w-0">
+        <section className="bg-white rounded-xl shadow p-4 mb-4">
+          <div className="flex flex-wrap gap-3 items-center">
+            <label className="text-sm font-medium">Project name
+              <input className="border rounded px-2 py-1 ml-2" value={projectName} onChange={e => setProjectName(e.target.value)} />
+            </label>
+            <button type="button" className="border rounded px-3 py-2 text-sm" onClick={() => setShowHistory(!showHistory)}>History ({history.length})</button>
+            <label className="border rounded px-3 py-2 text-sm cursor-pointer">{importing ? 'Opening...' : 'Open Excel / Backup'}
+              <input type="file" accept=".xlsx,.json" className="hidden" onChange={importProject} />
+            </label>
+            <button type="button" className="border rounded px-3 py-2 text-sm" onClick={() => downloadProject({ shipment, containers, containerNames, capacity, catalog, catalogSources, projectName }, projectName)}>Download Backup</button>
+          </div>
+          <p className="text-xs text-gray-500 mt-2">History is saved in this browser. Download backups for another computer or before clearing browser data. Edit exported Excel rows, save as XLSX, then use Open Excel / Backup to reopen them.</p>
+          {showHistory && <div className="mt-4 max-h-80 overflow-y-auto">
+            {!history.length && <p className="text-sm text-gray-500">Your container history will appear here when you create containers.</p>}
+            {history.map(entry => <div key={entry.id} className="border-t py-3 flex flex-wrap items-center gap-2 text-sm">
+              <div className="flex-1 min-w-48"><strong>{entry.name}</strong><p className="text-xs text-gray-500">{new Date(entry.createdAt).toLocaleString()} · {entry.project.containers.length} containers · {entry.project.containers.reduce((n, c) => n + c.totalCartons, 0)} cartons</p></div>
+              <button className="text-blue-700 px-2" onClick={async () => { try { await saveQueue.current; restoreProject({ ...entry.project, projectName: entry.name }); showToast('Saved project opened as a new working copy'); } catch { showToast('Save failed. Download a backup before opening history.', 'error'); } }}>Open / Duplicate</button>
+              <button className="px-2" onClick={() => downloadProject(entry.project, entry.name)}>Backup</button>
+              <button className="px-2" onClick={() => changeHistory(entry)}>Rename</button>
+              <button className="text-red-600 px-2" onClick={() => changeHistory(entry, true)}>Delete</button>
+            </div>)}
+          </div>}
+        </section>
 
         {/* HEADER */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
@@ -1852,6 +1932,7 @@ const ContainerOptimizer = () => {
           </div>
         )}
 
+        </fieldset>
       </div>
     </div>
   );
