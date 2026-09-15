@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { Plus, Download, Image, FileSpreadsheet, Upload, Search, ShoppingCart, Package, ChevronDown, ChevronUp, X, Trash2, ArrowUpDown, Edit3, Undo2, PlusCircle, CheckCircle, AlertTriangle, FileText, Copy, Loader, BarChart3, Clock } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import JSZip from 'jszip';
-import ExcelJS from 'exceljs';
+import { extractXlsxData } from './services/excelImport';
+import { generateContainers, addContainerProducts, moveProductBetweenContainers as moveContainerProducts, removeProductFromContainer as removeContainerProducts } from './services/optimizer';
+import { buildContainerCSV, buildPackingWorkbook } from './services/excelExport';
 import { readProjects, saveProject, updateHistory } from './projectStorage';
 import { importPackingWorkbook, downloadProject, validateProject } from './packingProject';
 
@@ -174,84 +174,6 @@ const ContainerOptimizer = () => {
   }, [lastSaved]);
 
   // ─── XLSX PARSING ───────────────────────────────────────────────
-  const extractXlsxData = async (file) => {
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-    // Extract images
-    const imageMap = {};
-    try {
-      const zip = await JSZip.loadAsync(arrayBuffer);
-      const relsFile = zip.file('xl/drawings/_rels/drawing1.xml.rels');
-      const drawingFile = zip.file('xl/drawings/drawing1.xml');
-      if (relsFile && drawingFile) {
-        const relsXml = await relsFile.async('string');
-        const drawingXml = await drawingFile.async('string');
-        const rIdMap = {};
-        for (const m of relsXml.matchAll(/Id="(rId\d+)"[^>]*Target="([^"]+)"/g)) {
-          rIdMap[m[1]] = m[2].replace('../', 'xl/');
-        }
-        const anchorPattern = /<xdr:oneCellAnchor>([\s\S]*?)<\/xdr:oneCellAnchor>/g;
-        let anchor;
-        while ((anchor = anchorPattern.exec(drawingXml))) {
-          const content = anchor[1];
-          const fromRow = content.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
-          const rIdMatch = content.match(/r:embed="(rId\d+)"/);
-          if (fromRow && rIdMatch) {
-            const row = parseInt(fromRow[1]);
-            const imagePath = rIdMap[rIdMatch[1]];
-            if (imagePath) {
-              const imgFile = zip.file(imagePath);
-              if (imgFile) {
-                const imgData = await imgFile.async('base64');
-                const ext = imagePath.split('.').pop().toLowerCase();
-                const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
-                imageMap[row] = `data:${mimeType};base64,${imgData}`;
-              }
-            }
-          }
-        }
-      }
-    } catch (imgErr) {
-      console.warn('Could not extract images:', imgErr);
-    }
-
-    const allData = [];
-    for (let i = 3; i < rows.length; i++) {
-      const row = rows[i];
-      const markNo = String(row[0] || '').trim();
-      if (!markNo || !markNo.match(/^\d+-\d+$/)) continue;
-
-      const description = [row[1], row[2], row[3]].map(v => String(v || '').trim()).filter(Boolean).join(' ') || markNo;
-      const ctn = parseInt(row[5]) || 1;
-      const pcsPerCtn = parseInt(row[6]) || 0;
-      const priceRaw = String(row[8] || '').replace(/[^\d.]/g, '');
-      const pricePerPcs = parseFloat(priceRaw) || 0;
-      const cbm = parseFloat(row[10]) || 0;
-      const weight = parseFloat(row[11]) || 0;
-      const photo = imageMap[i] || '';
-
-      allData.push({
-        id: `${file.name}-${markNo}-${Date.now()}-${i}`,
-        markNo,
-        description,
-        photo,
-        source: file.name,
-        pcsPerCtn,
-        pricePerPcs,
-        gwPerCtn: parseFloat((weight / ctn).toFixed(2)),
-        nwPerCtn: parseFloat((weight * 0.9 / ctn).toFixed(2)),
-        cbmPerCtn: parseFloat((cbm / ctn).toFixed(4)),
-        originalCtn: ctn,
-        originalWeight: weight,
-        originalCbm: cbm
-      });
-    }
-    return allData;
-  };
-
   const handleXlsxUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -535,33 +457,13 @@ const ContainerOptimizer = () => {
     if (qty <= 0) return;
 
     setContainers(prev => {
-      const updated = prev.map(c => ({ ...c, items: [...c.items] }));
-      const idx = updated.findIndex(c => c.id === containerId);
-      if (idx === -1) return prev;
-
-      // Check limits
-      const addedWeight = shipmentItem.gwPerCtn * qty;
-      const addedCBM = shipmentItem.cbmPerCtn * qty;
-      if (updated[idx].totalGW + addedWeight > maxWeight) {
+      const result = addContainerProducts(prev, containerId, shipmentItem, qty, maxWeight, maxCbm);
+      if (result.error === 'weight') {
         showToast(`Cannot add: would exceed weight limit (${maxWeight} kg)`, 'error');
-        return prev;
-      }
-      if (updated[idx].totalCBM + addedCBM > maxCbm) {
+      } else if (result.error === 'volume') {
         showToast(`Cannot add: would exceed volume limit (${maxCbm} m³)`, 'error');
-        return prev;
       }
-
-      // Add individual cartons as items
-      for (let i = 0; i < qty; i++) {
-        updated[idx].items.push({
-          ...shipmentItem,
-          singleCtnGW: shipmentItem.gwPerCtn,
-          singleCtnNW: shipmentItem.nwPerCtn,
-          singleCtnCBM: shipmentItem.cbmPerCtn
-        });
-      }
-      updated[idx] = recalcContainerTotals(updated[idx]);
-      return updated;
+      return result.containers;
     });
     showToast(`Added ${qty} CTN of ${shipmentItem.markNo} to Container #${containerNames[containerId] || containerId}`);
   };
@@ -580,53 +482,7 @@ const ContainerOptimizer = () => {
 
   // ─── EXPORT SINGLE CONTAINER CSV ───────────────────────────────
   const exportContainerCSV = useCallback((container) => {
-    const groupedItems = {};
-    const groupOrder = [];
-    container.items.forEach(item => {
-      const key = item.markNo + '|' + item.description;
-      if (!groupedItems[key]) {
-        groupedItems[key] = {
-          count: 0, markNo: item.markNo, description: item.description,
-          pcsPerCtn: item.pcsPerCtn, gwPerCtn: item.gwPerCtn,
-          nwPerCtn: item.nwPerCtn, cbmPerCtn: item.cbmPerCtn,
-          pricePerPcs: item.pricePerPcs || 0
-        };
-        groupOrder.push(key);
-      }
-      groupedItems[key].count++;
-    });
-
-    const headers = ['No', 'MARKS&NO', 'DESCRIPTION', 'CTN', 'PCS/CTN', 'UNIT', 'T/QTY', 'U/PRICE', 'AMOUNT', 'G.W.(KGS)', 'N.W.(KGS)', 'CBM'];
-    const rows = [headers.join(',')];
-    let idx = 0;
-    for (const key of groupOrder) {
-      const data = groupedItems[key];
-      idx++;
-      const totalQty = data.count * data.pcsPerCtn;
-      const amount = data.pricePerPcs * totalQty;
-      rows.push([
-        idx,
-        `"${data.markNo}"`,
-        `"${data.description.replace(/"/g, '""')}"`,
-        data.count,
-        data.pcsPerCtn,
-        'PCS',
-        totalQty,
-        data.pricePerPcs.toFixed(2),
-        amount.toFixed(2),
-        (data.gwPerCtn * data.count).toFixed(2),
-        (data.nwPerCtn * data.count).toFixed(2),
-        (data.cbmPerCtn * data.count).toFixed(4)
-      ].join(','));
-    }
-    // Total row
-    rows.push([
-      '', '', 'TOTAL', container.totalCartons, '', '', container.totalQty || '',
-      '', (container.totalPrice || 0).toFixed(2),
-      container.totalGW.toFixed(2), container.totalNW.toFixed(2), container.totalCBM.toFixed(2)
-    ].join(','));
-
-    const csvContent = rows.join('\n');
+    const csvContent = buildContainerCSV(container);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -686,306 +542,25 @@ const ContainerOptimizer = () => {
     setIsGenerating(true);
     // Use setTimeout to allow the loading UI to render before crunching
     setTimeout(() => {
-      const expandedProducts = [];
-      shipment.forEach(product => {
-        for (let i = 0; i < product.ctn; i++) {
-          expandedProducts.push({
-            ...product,
-            singleCtnGW: product.gwPerCtn,
-            singleCtnNW: product.nwPerCtn,
-            singleCtnCBM: product.cbmPerCtn
-          });
-        }
-      });
-
-      expandedProducts.sort((a, b) => b.singleCtnGW - a.singleCtnGW);
-
-      const newContainers = [];
-      let currentContainer = { id: 1, items: [], totalGW: 0, totalNW: 0, totalCBM: 0, totalCartons: 0, totalPrice: 0, totalQty: 0 };
-
-      expandedProducts.forEach(product => {
-        if (currentContainer.totalGW + product.singleCtnGW <= maxWeight &&
-          currentContainer.totalCBM + product.singleCtnCBM <= maxCbm) {
-          currentContainer.items.push(product);
-          currentContainer.totalGW += product.singleCtnGW;
-          currentContainer.totalNW += product.singleCtnNW;
-          currentContainer.totalCBM += product.singleCtnCBM;
-          currentContainer.totalCartons += 1;
-          currentContainer.totalPrice += (product.pricePerPcs || 0) * product.pcsPerCtn;
-          currentContainer.totalQty += product.pcsPerCtn;
-        } else {
-          if (currentContainer.items.length > 0) newContainers.push(currentContainer);
-          currentContainer = {
-            id: newContainers.length + 2,
-            items: [product],
-            totalGW: product.singleCtnGW,
-            totalNW: product.singleCtnNW,
-            totalCBM: product.singleCtnCBM,
-            totalCartons: 1,
-            totalPrice: (product.pricePerPcs || 0) * product.pcsPerCtn,
-            totalQty: product.pcsPerCtn
-          };
-        }
-      });
-      if (currentContainer.items.length > 0) newContainers.push(currentContainer);
+      const { containers: newContainers, cartonCount } = generateContainers(shipment, maxWeight, maxCbm);
       setContainers(newContainers);
       setIsGenerating(false);
-      showToast(`Generated ${newContainers.length} container(s) with ${expandedProducts.length} cartons`);
+      showToast(`Generated ${newContainers.length} container(s) with ${cartonCount} cartons`);
     }, 100);
   };
 
   // ─── CONTAINER MODIFICATION ─────────────────────────────────────
-  const recalcContainerTotals = (container) => {
-    let totalGW = 0, totalNW = 0, totalCBM = 0, totalCartons = 0, totalPrice = 0, totalQty = 0;
-    container.items.forEach(item => {
-      totalGW += item.gwPerCtn || item.singleCtnGW || 0;
-      totalNW += item.nwPerCtn || item.singleCtnNW || 0;
-      totalCBM += item.cbmPerCtn || item.singleCtnCBM || 0;
-      totalCartons += 1;
-      totalPrice += (item.pricePerPcs || 0) * (item.pcsPerCtn || 0);
-      totalQty += item.pcsPerCtn || 0;
-    });
-    return { ...container, totalGW, totalNW, totalCBM, totalCartons, totalPrice, totalQty };
-  };
-
   const moveProductBetweenContainers = (fromContainerId, productKey, ctnCount, toContainerId) => {
-    setContainers(prev => {
-      const updated = prev.map(c => ({ ...c, items: [...c.items] }));
-      const fromIdx = updated.findIndex(c => c.id === fromContainerId);
-      const toIdx = updated.findIndex(c => c.id === toContainerId);
-      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return prev;
-
-      const [markNo, description] = productKey.split('|');
-      // Collect matching items from source container
-      const matchingIndices = [];
-      updated[fromIdx].items.forEach((item, i) => {
-        if (item.markNo === markNo && item.description === description) {
-          matchingIndices.push(i);
-        }
-      });
-
-      const moveCount = Math.min(ctnCount, matchingIndices.length);
-      if (moveCount <= 0) return prev;
-
-      // Move items (take from end to keep indices stable)
-      const indicesToMove = matchingIndices.slice(-moveCount);
-      const movedItems = indicesToMove.map(i => updated[fromIdx].items[i]);
-
-      // Remove moved items from source
-      const removeSet = new Set(indicesToMove);
-      updated[fromIdx].items = updated[fromIdx].items.filter((_, i) => !removeSet.has(i));
-
-      // Add to target
-      updated[toIdx].items.push(...movedItems);
-
-      // Recalculate totals
-      updated[fromIdx] = recalcContainerTotals(updated[fromIdx]);
-      updated[toIdx] = recalcContainerTotals(updated[toIdx]);
-
-      // Remove empty containers
-      return updated.filter(c => c.items.length > 0);
-    });
+    setContainers(prev => moveContainerProducts(prev, fromContainerId, productKey, ctnCount, toContainerId));
   };
 
   const removeProductFromContainer = (containerId, productKey, ctnCount) => {
-    setContainers(prev => {
-      const updated = prev.map(c => ({ ...c, items: [...c.items] }));
-      const idx = updated.findIndex(c => c.id === containerId);
-      if (idx === -1) return prev;
-
-      const [markNo, description] = productKey.split('|');
-      const matchingIndices = [];
-      updated[idx].items.forEach((item, i) => {
-        if (item.markNo === markNo && item.description === description) {
-          matchingIndices.push(i);
-        }
-      });
-
-      const removeCount = Math.min(ctnCount, matchingIndices.length);
-      if (removeCount <= 0) return prev;
-
-      const indicesToRemove = new Set(matchingIndices.slice(-removeCount));
-      updated[idx].items = updated[idx].items.filter((_, i) => !indicesToRemove.has(i));
-      updated[idx] = recalcContainerTotals(updated[idx]);
-
-      return updated.filter(c => c.items.length > 0);
-    });
-  };
-
-  // ─── EXPORT HELPER: build worksheet for one container ─────────
-  const buildContainerSheet = (wb, ws, container) => {
-    const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2E5090' } };
-    const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
-    const titleFont = { bold: true, size: 14, color: { argb: 'FF2E5090' } };
-    const summaryFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
-    const totalFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCEAFF' } };
-    const thinBorder = {
-      top: { style: 'thin' }, left: { style: 'thin' },
-      bottom: { style: 'thin' }, right: { style: 'thin' }
-    };
-
-    // Column widths
-    ws.columns = [
-      { key: 'no', width: 6 },
-      { key: 'photo', width: 14 },
-      { key: 'markNo', width: 12 },
-      { key: 'description', width: 40 },
-      { key: 'ctn', width: 8 },
-      { key: 'pcsPerCtn', width: 10 },
-      { key: 'unit', width: 7 },
-      { key: 'totalQty', width: 10 },
-      { key: 'uPrice', width: 12 },
-      { key: 'amount', width: 14 },
-      { key: 'gw', width: 12 },
-      { key: 'nw', width: 12 },
-      { key: 'cbm', width: 10 }
-    ];
-
-    // ── Title row ──
-    const titleRow = ws.addRow([`CONTAINER #${container.id} — PACKING LIST`]);
-    ws.mergeCells(titleRow.number, 1, titleRow.number, 13);
-    titleRow.getCell(1).font = titleFont;
-    titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-    titleRow.height = 30;
-
-    // ── Summary rows ──
-    const weightPct = maxWeight > 0 ? (container.totalGW / maxWeight * 100).toFixed(1) : '0';
-    const cbmPct = maxCbm > 0 ? (container.totalCBM / maxCbm * 100).toFixed(1) : '0';
-
-    const summaryData = [
-      ['Total Cartons:', container.totalCartons, '', 'G.W.:', `${container.totalGW.toFixed(2)} KGS`, `(${weightPct}% of ${maxWeight} kg)`, '', 'CBM:', `${container.totalCBM.toFixed(2)} M³`, `(${cbmPct}% of ${maxCbm} m³)`, '', 'Total Price:', `¥${(container.totalPrice || 0).toFixed(2)}`],
-      ['N.W.:', `${container.totalNW.toFixed(2)} KGS`, '', 'T/QTY:', container.totalQty || '', '', '', '', '', '', '', '', '']
-    ];
-    summaryData.forEach(rowData => {
-      const row = ws.addRow(rowData);
-      row.eachCell((cell) => {
-        cell.fill = summaryFill;
-        cell.font = { bold: true, size: 10 };
-      });
-      row.height = 22;
-    });
-
-    ws.addRow([]); // spacer
-
-    // ── Header row ──
-    const headers = ['No', 'Photo', 'MARKS&NO', 'DESCRIPTION', 'CTN', 'PCS/CTN', 'UNIT', 'T/QTY', 'U/PRICE', 'AMOUNT', 'G.W.(KGS)', 'N.W.(KGS)', 'CBM'];
-    const headerRow = ws.addRow(headers);
-    headerRow.height = 24;
-    headerRow.eachCell((cell) => {
-      cell.fill = headerFill;
-      cell.font = headerFont;
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      cell.border = thinBorder;
-    });
-
-    // ── Group items ──
-    const groupedItems = {};
-    const groupOrder = [];
-    container.items.forEach(item => {
-      const key = item.markNo + '|' + item.description;
-      if (!groupedItems[key]) {
-        groupedItems[key] = {
-          count: 0, markNo: item.markNo, description: item.description,
-          pcsPerCtn: item.pcsPerCtn, gwPerCtn: item.gwPerCtn,
-          nwPerCtn: item.nwPerCtn, cbmPerCtn: item.cbmPerCtn,
-          pricePerPcs: item.pricePerPcs || 0, photo: item.photo
-        };
-        groupOrder.push(key);
-      }
-      groupedItems[key].count++;
-    });
-
-    // ── Data rows ──
-    const ROW_HEIGHT = 55;
-    let idx = 0;
-    for (const key of groupOrder) {
-      const data = groupedItems[key];
-      idx++;
-      const totalQty = data.count * data.pcsPerCtn;
-      const amount = data.pricePerPcs * totalQty;
-      const row = ws.addRow([
-        idx,
-        '', // photo placeholder
-        data.markNo,
-        data.description,
-        data.count,
-        data.pcsPerCtn,
-        'PCS',
-        totalQty,
-        parseFloat(data.pricePerPcs.toFixed(2)),
-        parseFloat(amount.toFixed(2)),
-        parseFloat((data.gwPerCtn * data.count).toFixed(2)),
-        parseFloat((data.nwPerCtn * data.count).toFixed(2)),
-        parseFloat((data.cbmPerCtn * data.count).toFixed(4))
-      ]);
-      row.height = ROW_HEIGHT;
-      // eslint-disable-next-line no-loop-func
-      row.eachCell((cell, colNumber) => {
-        cell.border = thinBorder;
-        cell.alignment = { vertical: 'middle', horizontal: colNumber <= 2 ? 'center' : (colNumber >= 5 ? 'center' : 'left') };
-        if (idx % 2 === 0) {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-        }
-      });
-      row.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-
-      // Add photo
-      if (data.photo) {
-        try {
-          const base64Match = data.photo.match(/^data:image\/(\w+);base64,(.+)/);
-          if (base64Match) {
-            const ext = base64Match[1] === 'png' ? 'png' : 'jpeg';
-            const imageId = wb.addImage({
-              base64: base64Match[2],
-              extension: ext
-            });
-            ws.addImage(imageId, {
-              tl: { col: 1.1, row: row.number - 1 + 0.1 },
-              br: { col: 1.9, row: row.number - 0.1 },
-              editAs: 'oneCell'
-            });
-          }
-        } catch (imgErr) {
-          console.warn('Could not embed image for', data.markNo, imgErr);
-        }
-      }
-    }
-
-    // ── Total row ──
-    const totalRow = ws.addRow([
-      '', '', 'TOTAL', '',
-      container.totalCartons,
-      '', '', container.totalQty || '',
-      '', parseFloat((container.totalPrice || 0).toFixed(2)),
-      parseFloat(container.totalGW.toFixed(2)),
-      parseFloat(container.totalNW.toFixed(2)),
-      parseFloat(container.totalCBM.toFixed(2))
-    ]);
-    totalRow.height = 26;
-    totalRow.eachCell((cell) => {
-      cell.fill = totalFill;
-      cell.font = { bold: true, size: 11 };
-      cell.border = thinBorder;
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    });
-    totalRow.getCell(3).alignment = { horizontal: 'left', vertical: 'middle' };
+    setContainers(prev => removeContainerProducts(prev, containerId, productKey, ctnCount));
   };
 
   // ─── EXPORT ALL CONTAINERS ─────────────────────────────────────
   const exportToXlsx = async () => {
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'Container Optimizer';
-    wb.created = new Date();
-
-    for (const container of containers) {
-      const ws = wb.addWorksheet(`Container ${container.id}`, {
-        properties: { defaultRowHeight: 20 }
-      });
-      buildContainerSheet(wb, ws, container);
-    }
-
-    // Generate and download
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await buildPackingWorkbook(containers, { maxWeight, maxCbm }, new Date());
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -997,16 +572,7 @@ const ContainerOptimizer = () => {
 
   // ─── EXPORT SINGLE CONTAINER ───────────────────────────────────
   const exportSingleContainer = useCallback(async (container) => {
-    const wb = new ExcelJS.Workbook();
-    wb.creator = 'Container Optimizer';
-    wb.created = new Date();
-
-    const ws = wb.addWorksheet(`Container ${container.id}`, {
-      properties: { defaultRowHeight: 20 }
-    });
-    buildContainerSheet(wb, ws, container);
-
-    const buffer = await wb.xlsx.writeBuffer();
+    const buffer = await buildPackingWorkbook([container], { maxWeight, maxCbm }, new Date());
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
