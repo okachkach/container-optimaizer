@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
+import { roundDecimal } from '../utils/decimal';
 
 /**
  * Read catalog rows and embedded images from the first workbook sheet.
@@ -75,9 +76,9 @@ export const extractXlsxData = async (file, now = Date.now) => {
       source: file.name,
       pcsPerCtn,
       pricePerPcs,
-      gwPerCtn: parseFloat((weight / ctn).toFixed(2)),
-      nwPerCtn: parseFloat((weight * 0.9 / ctn).toFixed(2)),
-      cbmPerCtn: parseFloat((cbm / ctn).toFixed(4)),
+      gwPerCtn: roundDecimal(weight / ctn),
+      nwPerCtn: roundDecimal(weight * 0.9 / ctn),
+      cbmPerCtn: roundDecimal(cbm / ctn),
       originalCtn: ctn,
       originalWeight: weight,
       originalCbm: cbm

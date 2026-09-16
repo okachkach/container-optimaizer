@@ -5,6 +5,7 @@ import { generateContainers, addContainerProducts, moveProductBetweenContainers 
 import { buildContainerCSV, buildPackingWorkbook } from './services/excelExport';
 import { readProjects, saveProject, updateHistory } from './projectStorage';
 import { importPackingWorkbook, downloadProject, validateProject } from './packingProject';
+import { DECIMAL_STEP, formatDecimal } from './utils/decimal';
 
 const ContainerOptimizer = () => {
   // Catalog: all products from uploaded XLSX files
@@ -316,10 +317,10 @@ const ContainerOptimizer = () => {
       `📦 ${name}`,
       `Cartons: ${container.totalCartons}`,
       `T/QTY: ${container.totalQty || 0}`,
-      `G.W.: ${container.totalGW.toFixed(2)} kg (${weightPct}%)`,
-      `N.W.: ${container.totalNW.toFixed(2)} kg`,
-      `CBM: ${container.totalCBM.toFixed(2)} m³ (${cbmPct}%)`,
-      `Total Price: ¥${(container.totalPrice || 0).toFixed(2)}`,
+      `G.W.: ${formatDecimal(container.totalGW)} kg (${weightPct}%)`,
+      `N.W.: ${formatDecimal(container.totalNW)} kg`,
+      `CBM: ${formatDecimal(container.totalCBM)} m³ (${cbmPct}%)`,
+      `Total Price: ¥${formatDecimal(container.totalPrice || 0)}`,
       `Products: ${Object.keys((() => { const g = {}; container.items.forEach(i => { g[i.markNo + '|' + i.description] = true; }); return g; })()).length} SKUs`
     ].join('\\n');
     try {
@@ -652,12 +653,12 @@ const ContainerOptimizer = () => {
           <div className="flex flex-wrap gap-4 items-center text-sm">
             <div className="flex items-center gap-2">
               <label className="text-gray-600 font-medium">Max Weight (kg):</label>
-              <input type="number" value={capacity.maxWeight} onChange={(e) => setCapacity({ ...capacity, maxWeight: e.target.value })}
+              <input type="number" step={DECIMAL_STEP} value={capacity.maxWeight} onChange={(e) => setCapacity({ ...capacity, maxWeight: e.target.value })}
                 className="w-28 px-2 py-1 border rounded text-center" />
             </div>
             <div className="flex items-center gap-2">
               <label className="text-gray-600 font-medium">Max CBM (m³):</label>
-              <input type="number" value={capacity.maxCbm} onChange={(e) => setCapacity({ ...capacity, maxCbm: e.target.value })}
+              <input type="number" step={DECIMAL_STEP} value={capacity.maxCbm} onChange={(e) => setCapacity({ ...capacity, maxCbm: e.target.value })}
                 className="w-28 px-2 py-1 border rounded text-center" />
             </div>
             <div className="ml-auto flex items-center gap-2 text-gray-500">
@@ -688,19 +689,19 @@ const ContainerOptimizer = () => {
               </div>
               <div className="bg-green-50 p-3 rounded-lg border border-green-200">
                 <p className="text-xs text-gray-500">Total G.W.</p>
-                <p className="text-xl font-bold text-green-700">{shipmentTotals.gw.toFixed(1)} kg</p>
+                <p className="text-xl font-bold text-green-700">{formatDecimal(shipmentTotals.gw)} kg</p>
               </div>
               <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
                 <p className="text-xs text-gray-500">Total N.W.</p>
-                <p className="text-xl font-bold text-purple-700">{shipmentTotals.nw.toFixed(1)} kg</p>
+                <p className="text-xl font-bold text-purple-700">{formatDecimal(shipmentTotals.nw)} kg</p>
               </div>
               <div className="bg-orange-50 p-3 rounded-lg border border-orange-200">
                 <p className="text-xs text-gray-500">Total CBM</p>
-                <p className="text-xl font-bold text-orange-700">{shipmentTotals.cbm.toFixed(2)} m³</p>
+                <p className="text-xl font-bold text-orange-700">{formatDecimal(shipmentTotals.cbm)} m³</p>
               </div>
               <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
                 <p className="text-xs text-gray-500">Total Value</p>
-                <p className="text-xl font-bold text-yellow-700">¥{shipmentTotals.price.toFixed(0)}</p>
+                <p className="text-xl font-bold text-yellow-700">¥{formatDecimal(shipmentTotals.price)}</p>
               </div>
               <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
                 <p className="text-xs text-gray-500">Est. Containers</p>
@@ -789,7 +790,7 @@ const ContainerOptimizer = () => {
                             <td className="px-3 py-2 font-mono text-xs">{product.markNo}</td>
                             <td className="px-3 py-2 font-medium max-w-48 truncate">{product.description}</td>
                             <td className="px-3 py-2">{product.pcsPerCtn}</td>
-                            <td className="px-3 py-2 text-green-700 font-medium">{product.pricePerPcs ? `¥${product.pricePerPcs.toFixed(2)}` : '-'}</td>
+                            <td className="px-3 py-2 text-green-700 font-medium">{product.pricePerPcs ? `¥${formatDecimal(product.pricePerPcs)}` : '-'}</td>
                             <td className="px-3 py-2">{product.gwPerCtn}</td>
                             <td className="px-3 py-2">{product.cbmPerCtn}</td>
                             <td className="px-3 py-2 text-xs text-gray-500 max-w-24 truncate">{product.source}</td>
@@ -854,16 +855,16 @@ const ContainerOptimizer = () => {
                 <input type="number" placeholder="PCS/CTN" value={newProduct.pcsPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, pcsPerCtn: e.target.value })}
                   className="px-3 py-2 border rounded text-sm" />
-                <input type="number" step="0.01" placeholder="U/Price (¥)" value={newProduct.pricePerPcs}
+                <input type="number" step={DECIMAL_STEP} placeholder="U/Price (¥)" value={newProduct.pricePerPcs}
                   onChange={(e) => setNewProduct({ ...newProduct, pricePerPcs: e.target.value })}
                   className="px-3 py-2 border rounded text-sm" />
-                <input type="number" step="0.01" placeholder="G.W./CTN (kg)" value={newProduct.gwPerCtn}
+                <input type="number" step={DECIMAL_STEP} placeholder="G.W./CTN (kg)" value={newProduct.gwPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, gwPerCtn: e.target.value })}
                   className="px-3 py-2 border rounded text-sm" />
-                <input type="number" step="0.01" placeholder="N.W./CTN (kg)" value={newProduct.nwPerCtn}
+                <input type="number" step={DECIMAL_STEP} placeholder="N.W./CTN (kg)" value={newProduct.nwPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, nwPerCtn: e.target.value })}
                   className="px-3 py-2 border rounded text-sm" />
-                <input type="number" step="0.0001" placeholder="CBM/CTN" value={newProduct.cbmPerCtn}
+                <input type="number" step={DECIMAL_STEP} placeholder="CBM/CTN" value={newProduct.cbmPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, cbmPerCtn: e.target.value })}
                   className="px-3 py-2 border rounded text-sm" />
               </div>
@@ -897,9 +898,9 @@ const ContainerOptimizer = () => {
               </h2>
               <div className="flex items-center gap-2">
                 <div className="flex gap-2 text-xs flex-wrap">
-                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded">G.W: {shipmentTotals.gw.toFixed(1)} kg</span>
-                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">CBM: {shipmentTotals.cbm.toFixed(2)} m³</span>
-                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded">¥{shipmentTotals.price.toFixed(2)}</span>
+                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded">G.W: {formatDecimal(shipmentTotals.gw)} kg</span>
+                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">CBM: {formatDecimal(shipmentTotals.cbm)} m³</span>
+                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded">¥{formatDecimal(shipmentTotals.price)}</span>
                   <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded">
                     ~{Math.ceil(Math.max(shipmentTotals.gw / (maxWeight || 1), shipmentTotals.cbm / (maxCbm || 1)))} container(s)
                   </span>
@@ -979,11 +980,11 @@ const ContainerOptimizer = () => {
                       </td>
                       <td className="px-3 py-2">{item.pcsPerCtn}</td>
                       <td className="px-3 py-2 font-medium">{item.totalQty}</td>
-                      <td className="px-3 py-2 text-green-700">{item.pricePerPcs ? `¥${item.pricePerPcs.toFixed(2)}` : '-'}</td>
-                      <td className="px-3 py-2 font-medium text-green-700">¥{(item.totalPrice || 0).toFixed(2)}</td>
-                      <td className="px-3 py-2">{item.totalGW.toFixed(2)}</td>
-                      <td className="px-3 py-2">{item.totalNW.toFixed(2)}</td>
-                      <td className="px-3 py-2">{item.totalCBM.toFixed(4)}</td>
+                      <td className="px-3 py-2 text-green-700">{item.pricePerPcs ? `¥${formatDecimal(item.pricePerPcs)}` : '-'}</td>
+                      <td className="px-3 py-2 font-medium text-green-700">¥{formatDecimal(item.totalPrice || 0)}</td>
+                      <td className="px-3 py-2">{formatDecimal(item.totalGW)}</td>
+                      <td className="px-3 py-2">{formatDecimal(item.totalNW)}</td>
+                      <td className="px-3 py-2">{formatDecimal(item.totalCBM)}</td>
                       <td className="px-3 py-2 text-xs text-gray-400 max-w-20 truncate">{item.source}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1 justify-center">
@@ -1060,19 +1061,19 @@ const ContainerOptimizer = () => {
               </div>
               <div className="bg-green-50 p-3 rounded border border-green-200">
                 <p className="text-gray-500 text-xs">Total G.W.</p>
-                <p className="text-lg font-bold text-green-700">{grandTotals.gw.toFixed(2)} kg</p>
+                <p className="text-lg font-bold text-green-700">{formatDecimal(grandTotals.gw)} kg</p>
               </div>
               <div className="bg-purple-50 p-3 rounded border border-purple-200">
                 <p className="text-gray-500 text-xs">Total N.W.</p>
-                <p className="text-lg font-bold text-purple-700">{grandTotals.nw.toFixed(2)} kg</p>
+                <p className="text-lg font-bold text-purple-700">{formatDecimal(grandTotals.nw)} kg</p>
               </div>
               <div className="bg-orange-50 p-3 rounded border border-orange-200">
                 <p className="text-gray-500 text-xs">Total CBM</p>
-                <p className="text-lg font-bold text-orange-700">{grandTotals.cbm.toFixed(2)} m³</p>
+                <p className="text-lg font-bold text-orange-700">{formatDecimal(grandTotals.cbm)} m³</p>
               </div>
               <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
                 <p className="text-gray-500 text-xs">Total Price</p>
-                <p className="text-lg font-bold text-yellow-700">¥{grandTotals.price.toFixed(2)}</p>
+                <p className="text-lg font-bold text-yellow-700">¥{formatDecimal(grandTotals.price)}</p>
               </div>
             </div>
 
@@ -1170,19 +1171,19 @@ const ContainerOptimizer = () => {
                     </div>
                     <div className="bg-green-50 p-3 rounded">
                       <p className="text-gray-600">G.W.</p>
-                      <p className="text-xl font-bold text-green-700">{container.totalGW.toFixed(2)} kg</p>
+                      <p className="text-xl font-bold text-green-700">{formatDecimal(container.totalGW)} kg</p>
                     </div>
                     <div className="bg-purple-50 p-3 rounded">
                       <p className="text-gray-600">N.W.</p>
-                      <p className="text-xl font-bold text-purple-700">{container.totalNW.toFixed(2)} kg</p>
+                      <p className="text-xl font-bold text-purple-700">{formatDecimal(container.totalNW)} kg</p>
                     </div>
                     <div className="bg-orange-50 p-3 rounded">
                       <p className="text-gray-600">CBM</p>
-                      <p className="text-xl font-bold text-orange-700">{container.totalCBM.toFixed(2)} m³</p>
+                      <p className="text-xl font-bold text-orange-700">{formatDecimal(container.totalCBM)} m³</p>
                     </div>
                     <div className="bg-yellow-50 p-3 rounded">
                       <p className="text-gray-600">Total Price</p>
-                      <p className="text-xl font-bold text-yellow-700">¥{(container.totalPrice || 0).toFixed(2)}</p>
+                      <p className="text-xl font-bold text-yellow-700">¥{formatDecimal(container.totalPrice || 0)}</p>
                     </div>
                   </div>
 
@@ -1247,11 +1248,11 @@ const ContainerOptimizer = () => {
                               <td className="px-3 py-2 font-medium">{data.count}</td>
                               <td className="px-3 py-2">{data.pcsPerCtn}</td>
                               <td className="px-3 py-2 font-medium">{totalQty}</td>
-                              <td className="px-3 py-2 text-green-700">{data.pricePerPcs ? `¥${data.pricePerPcs.toFixed(2)}` : '-'}</td>
-                              <td className="px-3 py-2 font-medium text-green-700">¥{amount.toFixed(2)}</td>
-                              <td className="px-3 py-2">{(data.gwPerCtn * data.count).toFixed(2)}</td>
-                              <td className="px-3 py-2">{(data.nwPerCtn * data.count).toFixed(2)}</td>
-                              <td className="px-3 py-2">{(data.cbmPerCtn * data.count).toFixed(2)}</td>
+                              <td className="px-3 py-2 text-green-700">{data.pricePerPcs ? `¥${formatDecimal(data.pricePerPcs)}` : '-'}</td>
+                              <td className="px-3 py-2 font-medium text-green-700">¥{formatDecimal(amount)}</td>
+                              <td className="px-3 py-2">{formatDecimal(data.gwPerCtn * data.count)}</td>
+                              <td className="px-3 py-2">{formatDecimal(data.nwPerCtn * data.count)}</td>
+                              <td className="px-3 py-2">{formatDecimal(data.cbmPerCtn * data.count)}</td>
                               <td className="px-3 py-2">
                                 <div className="flex flex-col gap-1">
                                   <div className="flex items-center gap-1">
@@ -1388,11 +1389,11 @@ const ContainerOptimizer = () => {
                   <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
                     <div className="bg-green-50 p-2 rounded border border-green-200">
                       <span className="text-gray-600">Remaining Weight: </span>
-                      <span className="font-bold text-green-700">{remainWeight.toFixed(2)} kg</span>
+                      <span className="font-bold text-green-700">{formatDecimal(remainWeight)} kg</span>
                     </div>
                     <div className="bg-blue-50 p-2 rounded border border-blue-200">
                       <span className="text-gray-600">Remaining Volume: </span>
-                      <span className="font-bold text-blue-700">{remainCBM.toFixed(4)} m³</span>
+                      <span className="font-bold text-blue-700">{formatDecimal(remainCBM)} m³</span>
                     </div>
                   </div>
                 );

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { formatDecimal, roundDecimal } from '../utils/decimal';
 
 /**
  * Format a container as CSV, preserving group order and existing totals.
@@ -38,18 +39,18 @@ export const buildContainerCSV = (container) => {
       data.pcsPerCtn,
       'PCS',
       totalQty,
-      data.pricePerPcs.toFixed(2),
-      amount.toFixed(2),
-      (data.gwPerCtn * data.count).toFixed(2),
-      (data.nwPerCtn * data.count).toFixed(2),
-      (data.cbmPerCtn * data.count).toFixed(4)
+      formatDecimal(data.pricePerPcs),
+      formatDecimal(amount),
+      formatDecimal(data.gwPerCtn * data.count),
+      formatDecimal(data.nwPerCtn * data.count),
+      formatDecimal(data.cbmPerCtn * data.count)
     ].join(','));
   }
   // Total row
   rows.push([
     '', '', 'TOTAL', container.totalCartons, '', '', container.totalQty || '',
-    '', (container.totalPrice || 0).toFixed(2),
-    container.totalGW.toFixed(2), container.totalNW.toFixed(2), container.totalCBM.toFixed(2)
+    '', formatDecimal(container.totalPrice || 0),
+    formatDecimal(container.totalGW), formatDecimal(container.totalNW), formatDecimal(container.totalCBM)
   ].join(','));
 
   return rows.join('\n');
@@ -104,8 +105,8 @@ export const buildContainerSheet = (wb, ws, container, { maxWeight, maxCbm }) =>
   const cbmPct = maxCbm > 0 ? (container.totalCBM / maxCbm * 100).toFixed(1) : '0';
 
   const summaryData = [
-    ['Total Cartons:', container.totalCartons, '', 'G.W.:', `${container.totalGW.toFixed(2)} KGS`, `(${weightPct}% of ${maxWeight} kg)`, '', 'CBM:', `${container.totalCBM.toFixed(2)} M³`, `(${cbmPct}% of ${maxCbm} m³)`, '', 'Total Price:', `¥${(container.totalPrice || 0).toFixed(2)}`],
-    ['N.W.:', `${container.totalNW.toFixed(2)} KGS`, '', 'T/QTY:', container.totalQty || '', '', '', '', '', '', '', '', '']
+    ['Total Cartons:', container.totalCartons, '', 'G.W.:', `${formatDecimal(container.totalGW)} KGS`, `(${weightPct}% of ${maxWeight} kg)`, '', 'CBM:', `${formatDecimal(container.totalCBM)} M³`, `(${cbmPct}% of ${maxCbm} m³)`, '', 'Total Price:', `¥${formatDecimal(container.totalPrice || 0)}`],
+    ['N.W.:', `${formatDecimal(container.totalNW)} KGS`, '', 'T/QTY:', container.totalQty || '', '', '', '', '', '', '', '', '']
   ];
   summaryData.forEach(rowData => {
     const row = ws.addRow(rowData);
@@ -163,11 +164,11 @@ export const buildContainerSheet = (wb, ws, container, { maxWeight, maxCbm }) =>
       data.pcsPerCtn,
       'PCS',
       totalQty,
-      parseFloat(data.pricePerPcs.toFixed(2)),
-      parseFloat(amount.toFixed(2)),
-      parseFloat((data.gwPerCtn * data.count).toFixed(2)),
-      parseFloat((data.nwPerCtn * data.count).toFixed(2)),
-      parseFloat((data.cbmPerCtn * data.count).toFixed(4))
+      roundDecimal(data.pricePerPcs),
+      roundDecimal(amount),
+      roundDecimal(data.gwPerCtn * data.count),
+      roundDecimal(data.nwPerCtn * data.count),
+      roundDecimal(data.cbmPerCtn * data.count)
     ]);
     row.height = ROW_HEIGHT;
     // eslint-disable-next-line no-loop-func
@@ -179,6 +180,7 @@ export const buildContainerSheet = (wb, ws, container, { maxWeight, maxCbm }) =>
       }
     });
     row.getCell(4).alignment = { vertical: 'middle', wrapText: true };
+    for (let col = 9; col <= 13; col++) row.getCell(col).numFmt = '0.0000';
 
     // Add photo
     if (data.photo) {
@@ -207,10 +209,10 @@ export const buildContainerSheet = (wb, ws, container, { maxWeight, maxCbm }) =>
     '', '', 'TOTAL', '',
     container.totalCartons,
     '', '', container.totalQty || '',
-    '', parseFloat((container.totalPrice || 0).toFixed(2)),
-    parseFloat(container.totalGW.toFixed(2)),
-    parseFloat(container.totalNW.toFixed(2)),
-    parseFloat(container.totalCBM.toFixed(2))
+    '', roundDecimal(container.totalPrice || 0),
+    roundDecimal(container.totalGW),
+    roundDecimal(container.totalNW),
+    roundDecimal(container.totalCBM)
   ]);
   totalRow.height = 26;
   totalRow.eachCell((cell) => {
@@ -220,6 +222,7 @@ export const buildContainerSheet = (wb, ws, container, { maxWeight, maxCbm }) =>
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
   totalRow.getCell(3).alignment = { horizontal: 'left', vertical: 'middle' };
+  for (let col = 10; col <= 13; col++) totalRow.getCell(col).numFmt = '0.0000';
 };
 
 /**
