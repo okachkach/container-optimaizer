@@ -6,6 +6,8 @@ import { buildContainerCSV, buildPackingWorkbook } from './services/excelExport'
 import { readProjects, saveProject, updateHistory } from './projectStorage';
 import { importPackingWorkbook, downloadProject, validateProject } from './packingProject';
 import { DECIMAL_STEP, formatDecimal } from './utils/decimal';
+import ThemeToggle from './ThemeToggle';
+import ContainerContents from './ContainerContents';
 
 const ContainerOptimizer = () => {
   // Catalog: all products from uploaded XLSX files
@@ -20,6 +22,8 @@ const ContainerOptimizer = () => {
   // UI state
   const [showCatalog, setShowCatalog] = useState(true);
   const [showManualAdd, setShowManualAdd] = useState(false);
+  // Keep only one WebGL canvas active while preserving every container's list.
+  const [active3DContainerId, setActive3DContainerId] = useState(null);
   // Container capacity
   const [capacity, setCapacity] = useState({ maxWeight: 27000, maxCbm: 76 });
   const maxWeight = parseFloat(capacity.maxWeight) || 0;
@@ -339,8 +343,8 @@ const ContainerOptimizer = () => {
     if (maxPct > 100) return 'border-blue-500';
     if (maxPct >= 95) return 'border-yellow-500';
     if (maxPct >= 80) return 'border-green-500';
-    if (maxPct >= 70) return 'border-slate-300';
-    return 'border-red-400';
+    if (maxPct >= 70) return 'border-slate-300 dark:border-slate-600';
+    return 'border-red-400 dark:border-red-500';
   };
 
   // ─── SORTING ────────────────────────────────────────────────────
@@ -401,7 +405,7 @@ const ContainerOptimizer = () => {
     const isActive = sortConfig.key === sortKey;
     return (
       <th
-        className={`px-3 py-2 text-left font-bold border-b cursor-pointer hover:bg-green-100 select-none transition ${className} ${isActive ? 'bg-green-100 text-green-800' : ''}`}
+        className={`px-3 py-2 text-left font-bold border-b dark:border-slate-700 cursor-pointer hover:bg-green-100 dark:hover:bg-green-900/40 select-none transition ${className} ${isActive ? 'bg-green-100 dark:bg-green-950/50 text-green-800 dark:text-green-300' : ''}`}
         onClick={() => handleSort(sortKey)}
       >
         <div className="flex items-center gap-1">
@@ -409,7 +413,7 @@ const ContainerOptimizer = () => {
           {isActive ? (
             sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
           ) : (
-            <ArrowUpDown className="w-3 h-3 text-gray-400" />
+            <ArrowUpDown className="w-3 h-3 text-gray-400 dark:text-slate-400" />
           )}
         </div>
       </th>
@@ -610,58 +614,61 @@ const ContainerOptimizer = () => {
 
   // ─── RENDER ─────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900 p-4">
       <div className="max-w-7xl mx-auto">
-        {storageError && <p role="alert" className="bg-red-100 text-red-800 p-3 rounded mb-3">{storageError}</p>}
+        <div className="mb-3 flex justify-end">
+          <ThemeToggle />
+        </div>
+        {storageError && <p role="alert" className="bg-red-100 dark:bg-red-950/50 text-red-800 dark:text-red-300 p-3 rounded mb-3">{storageError}</p>}
         {!storageReady && <p role="status" className="p-3">Opening saved workspace...</p>}
         <fieldset disabled={!storageReady || importing} className="min-w-0">
-        <section className="bg-white rounded-xl shadow p-4 mb-4">
+        <section className="bg-white dark:bg-slate-900 rounded-xl shadow dark:shadow-black/20 p-4 mb-4">
           <div className="flex flex-wrap gap-3 items-center">
             <label className="text-sm font-medium">Project name
-              <input className="border rounded px-2 py-1 ml-2" value={projectName} onChange={e => setProjectName(e.target.value)} />
+              <input className="border dark:border-slate-700 rounded px-2 py-1 ml-2" value={projectName} onChange={e => setProjectName(e.target.value)} />
             </label>
-            <button type="button" className="border rounded px-3 py-2 text-sm" onClick={() => setShowHistory(!showHistory)}>History ({history.length})</button>
-            <label className="border rounded px-3 py-2 text-sm cursor-pointer">{importing ? 'Opening...' : 'Open Excel / Backup'}
+            <button type="button" className="border dark:border-slate-700 rounded px-3 py-2 text-sm" onClick={() => setShowHistory(!showHistory)}>History ({history.length})</button>
+            <label className="border dark:border-slate-700 rounded px-3 py-2 text-sm cursor-pointer">{importing ? 'Opening...' : 'Open Excel / Backup'}
               <input type="file" accept=".xlsx,.json" className="hidden" onChange={importProject} />
             </label>
-            <button type="button" className="border rounded px-3 py-2 text-sm" onClick={() => downloadProject({ shipment, containers, containerNames, capacity, catalog, catalogSources, projectName }, projectName)}>Download Backup</button>
+            <button type="button" className="border dark:border-slate-700 rounded px-3 py-2 text-sm" onClick={() => downloadProject({ shipment, containers, containerNames, capacity, catalog, catalogSources, projectName }, projectName)}>Download Backup</button>
           </div>
-          <p className="text-xs text-gray-500 mt-2">History is saved in this browser. Download backups for another computer or before clearing browser data. Edit exported Excel rows, save as XLSX, then use Open Excel / Backup to reopen them.</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400 mt-2">History is saved in this browser. Download backups for another computer or before clearing browser data. Edit exported Excel rows, save as XLSX, then use Open Excel / Backup to reopen them.</p>
           {showHistory && <div className="mt-4 max-h-80 overflow-y-auto">
-            {!history.length && <p className="text-sm text-gray-500">Your container history will appear here when you create containers.</p>}
-            {history.map(entry => <div key={entry.id} className="border-t py-3 flex flex-wrap items-center gap-2 text-sm">
-              <div className="flex-1 min-w-48"><strong>{entry.name}</strong><p className="text-xs text-gray-500">{new Date(entry.createdAt).toLocaleString()} · {entry.project.containers.length} containers · {entry.project.containers.reduce((n, c) => n + c.totalCartons, 0)} cartons</p></div>
-              <button className="text-blue-700 px-2" onClick={async () => { try { await saveQueue.current; restoreProject({ ...entry.project, projectName: entry.name }); showToast('Saved project opened as a new working copy'); } catch { showToast('Save failed. Download a backup before opening history.', 'error'); } }}>Open / Duplicate</button>
+            {!history.length && <p className="text-sm text-gray-500 dark:text-slate-400">Your container history will appear here when you create containers.</p>}
+            {history.map(entry => <div key={entry.id} className="border-t dark:border-slate-700 py-3 flex flex-wrap items-center gap-2 text-sm">
+              <div className="flex-1 min-w-48"><strong>{entry.name}</strong><p className="text-xs text-gray-500 dark:text-slate-400">{new Date(entry.createdAt).toLocaleString()} · {entry.project.containers.length} containers · {entry.project.containers.reduce((n, c) => n + c.totalCartons, 0)} cartons</p></div>
+              <button className="text-blue-700 dark:text-blue-300 px-2" onClick={async () => { try { await saveQueue.current; restoreProject({ ...entry.project, projectName: entry.name }); showToast('Saved project opened as a new working copy'); } catch { showToast('Save failed. Download a backup before opening history.', 'error'); } }}>Open / Duplicate</button>
               <button className="px-2" onClick={() => downloadProject(entry.project, entry.name)}>Backup</button>
               <button className="px-2" onClick={() => changeHistory(entry)}>Rename</button>
-              <button className="text-red-600 px-2" onClick={() => changeHistory(entry, true)}>Delete</button>
+              <button className="text-red-600 dark:text-red-400 px-2" onClick={() => changeHistory(entry, true)}>Delete</button>
             </div>)}
           </div>}
         </section>
 
         {/* HEADER */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg dark:shadow-black/20 p-6 mb-4">
           <div className="flex items-center gap-3 mb-2">
-            <FileSpreadsheet className="w-8 h-8 text-blue-600" />
-            <h1 className="text-2xl font-bold text-gray-800">Container Packing List Generator</h1>
+            <FileSpreadsheet className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+            <h1 className="text-2xl font-bold text-gray-800 dark:text-slate-100">Container Packing List Generator</h1>
             {lastSavedDisplay && (
-              <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400 dark:text-slate-400">
                 <Clock className="w-3.5 h-3.5" /> Saved: {lastSavedDisplay}
               </span>
             )}
           </div>
           <div className="flex flex-wrap gap-4 items-center text-sm">
             <div className="flex items-center gap-2">
-              <label className="text-gray-600 font-medium">Max Weight (kg):</label>
+              <label className="text-gray-600 dark:text-slate-300 font-medium">Max Weight (kg):</label>
               <input type="number" step={DECIMAL_STEP} value={capacity.maxWeight} onChange={(e) => setCapacity({ ...capacity, maxWeight: e.target.value })}
-                className="w-28 px-2 py-1 border rounded text-center" />
+                className="w-28 px-2 py-1 border dark:border-slate-700 rounded text-center" />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-gray-600 font-medium">Max CBM (m³):</label>
+              <label className="text-gray-600 dark:text-slate-300 font-medium">Max CBM (m³):</label>
               <input type="number" step={DECIMAL_STEP} value={capacity.maxCbm} onChange={(e) => setCapacity({ ...capacity, maxCbm: e.target.value })}
-                className="w-28 px-2 py-1 border rounded text-center" />
+                className="w-28 px-2 py-1 border dark:border-slate-700 rounded text-center" />
             </div>
-            <div className="ml-auto flex items-center gap-2 text-gray-500">
+            <div className="ml-auto flex items-center gap-2 text-gray-500 dark:text-slate-400">
               <Package className="w-4 h-4" />
               <span>{catalog.length} in catalog</span>
               <span className="mx-1">|</span>
@@ -673,39 +680,39 @@ const ContainerOptimizer = () => {
 
         {/* STATS DASHBOARD */}
         {shipment.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-4 mb-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg dark:shadow-black/20 p-4 mb-4">
             <div className="flex items-center gap-2 mb-3">
-              <BarChart3 className="w-5 h-5 text-blue-600" />
-              <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Shipment Overview</h2>
+              <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <h2 className="text-sm font-bold text-gray-700 dark:text-slate-200 uppercase tracking-wide">Shipment Overview</h2>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
-              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                <p className="text-xs text-gray-500">Products</p>
-                <p className="text-xl font-bold text-blue-700">{shipment.length}</p>
+              <div className="bg-blue-50 dark:bg-blue-950/50 p-3 rounded-lg border border-blue-200 dark:border-blue-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Products</p>
+                <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{shipment.length}</p>
               </div>
-              <div className="bg-slate-50 p-3 rounded-lg border">
-                <p className="text-xs text-gray-500">Total Cartons</p>
-                <p className="text-xl font-bold text-slate-800">{shipmentTotals.ctn}</p>
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg border dark:border-slate-700">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Total Cartons</p>
+                <p className="text-xl font-bold text-slate-800 dark:text-slate-100">{shipmentTotals.ctn}</p>
               </div>
-              <div className="bg-green-50 p-3 rounded-lg border border-green-200">
-                <p className="text-xs text-gray-500">Total G.W.</p>
-                <p className="text-xl font-bold text-green-700">{formatDecimal(shipmentTotals.gw)} kg</p>
+              <div className="bg-green-50 dark:bg-green-950/50 p-3 rounded-lg border border-green-200 dark:border-green-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Total G.W.</p>
+                <p className="text-xl font-bold text-green-700 dark:text-green-300">{formatDecimal(shipmentTotals.gw)} kg</p>
               </div>
-              <div className="bg-purple-50 p-3 rounded-lg border border-purple-200">
-                <p className="text-xs text-gray-500">Total N.W.</p>
-                <p className="text-xl font-bold text-purple-700">{formatDecimal(shipmentTotals.nw)} kg</p>
+              <div className="bg-purple-50 dark:bg-purple-950/50 p-3 rounded-lg border border-purple-200 dark:border-purple-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Total N.W.</p>
+                <p className="text-xl font-bold text-purple-700 dark:text-purple-300">{formatDecimal(shipmentTotals.nw)} kg</p>
               </div>
-              <div className="bg-orange-50 p-3 rounded-lg border border-orange-200">
-                <p className="text-xs text-gray-500">Total CBM</p>
-                <p className="text-xl font-bold text-orange-700">{formatDecimal(shipmentTotals.cbm)} m³</p>
+              <div className="bg-orange-50 dark:bg-orange-950/50 p-3 rounded-lg border border-orange-200 dark:border-orange-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Total CBM</p>
+                <p className="text-xl font-bold text-orange-700 dark:text-orange-300">{formatDecimal(shipmentTotals.cbm)} m³</p>
               </div>
-              <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-                <p className="text-xs text-gray-500">Total Value</p>
-                <p className="text-xl font-bold text-yellow-700">¥{formatDecimal(shipmentTotals.price)}</p>
+              <div className="bg-yellow-50 dark:bg-yellow-950/50 p-3 rounded-lg border border-yellow-200 dark:border-yellow-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Total Value</p>
+                <p className="text-xl font-bold text-yellow-700 dark:text-yellow-300">¥{formatDecimal(shipmentTotals.price)}</p>
               </div>
-              <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-200">
-                <p className="text-xs text-gray-500">Est. Containers</p>
-                <p className="text-xl font-bold text-indigo-700">
+              <div className="bg-indigo-50 dark:bg-indigo-950/50 p-3 rounded-lg border border-indigo-200 dark:border-indigo-900">
+                <p className="text-xs text-gray-500 dark:text-slate-400">Est. Containers</p>
+                <p className="text-xl font-bold text-indigo-700 dark:text-indigo-300">
                   ~{Math.ceil(Math.max(shipmentTotals.gw / (maxWeight || 1), shipmentTotals.cbm / (maxCbm || 1)))}
                 </p>
               </div>
@@ -714,15 +721,15 @@ const ContainerOptimizer = () => {
         )}
 
         {/* CATALOG SECTION */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg dark:shadow-black/20 p-6 mb-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setShowCatalog(!showCatalog)}>
               {showCatalog ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-              <h2 className="text-xl font-bold text-gray-800">Product Catalog</h2>
+              <h2 className="text-xl font-bold text-gray-800 dark:text-slate-100">Product Catalog</h2>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer bg-blue-50 px-4 py-2 rounded border-2 border-blue-300 hover:bg-blue-100 transition">
-              <Upload className="w-4 h-4 text-blue-600" />
-              <span className="text-sm font-medium text-blue-700">Upload XLSX</span>
+            <label className="flex items-center gap-2 cursor-pointer bg-blue-50 dark:bg-blue-950/50 px-4 py-2 rounded border-2 border-blue-300 dark:border-blue-900 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition">
+              <Upload className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Upload XLSX</span>
               <input type="file" accept=".xlsx,.xls" onChange={handleXlsxUpload} className="hidden" />
             </label>
           </div>
@@ -731,9 +738,9 @@ const ContainerOptimizer = () => {
           {catalogSources.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3">
               {catalogSources.map((src, i) => (
-                <span key={i} className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs px-3 py-1 rounded-full">
+                <span key={i} className="inline-flex items-center gap-1 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 text-xs px-3 py-1 rounded-full">
                   {src}
-                  <button onClick={() => removeCatalogSource(src)} className="text-gray-400 hover:text-red-500 ml-1">
+                  <button onClick={() => removeCatalogSource(src)} className="text-gray-400 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-200 ml-1">
                     <X className="w-3 h-3" />
                   </button>
                 </span>
@@ -745,55 +752,55 @@ const ContainerOptimizer = () => {
             <>
               {/* Search */}
               <div className="relative mb-4">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-400" />
                 <input
                   type="text"
                   placeholder="Search by name, mark number, or source file..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full pl-10 pr-4 py-2 border dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent"
                 />
               </div>
 
               {/* Catalog Table */}
               {filteredCatalog.length > 0 ? (
-                <div className="border rounded-lg overflow-x-auto max-h-[500px] overflow-y-auto">
+                <div className="border dark:border-slate-700 rounded-lg overflow-x-auto max-h-[500px] overflow-y-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0">
+                    <thead className="bg-gray-50 dark:bg-slate-800 sticky top-0">
                       <tr>
-                        <th className="px-3 py-2 text-left font-bold border-b">Photo</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Mark No</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Description</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">PCS/CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">U/Price</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">G.W./CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">CBM/CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Source</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Add to Shipment</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Photo</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Mark No</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Description</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">PCS/CTN</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">U/Price</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">G.W./CTN</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">CBM/CTN</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Source</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Add to Shipment</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredCatalog.map((product) => {
                         const inShipment = shipment.find(s => s.catalogId === product.id);
                         return (
-                          <tr key={product.id} className={`border-b hover:bg-blue-50 transition ${inShipment ? 'bg-green-50' : ''}`}>
+                          <tr key={product.id} className={`border-b dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition ${inShipment ? 'bg-green-50 dark:bg-green-950/50' : ''}`}>
                             <td className="px-3 py-2">
                               {product.photo ? (
-                                <img src={product.photo} alt="" className="w-12 h-12 object-cover rounded border cursor-pointer hover:opacity-80 transition"
+                                <img src={product.photo} alt="" className="w-12 h-12 object-cover rounded border dark:border-slate-700 cursor-pointer hover:opacity-80 transition"
                                   onClick={() => setPhotoModal({ show: true, src: product.photo, alt: product.description })} />
                               ) : (
-                                <div className="w-12 h-12 bg-gray-100 rounded border flex items-center justify-center">
-                                  <Image className="w-4 h-4 text-gray-300" />
+                                <div className="w-12 h-12 bg-gray-100 dark:bg-slate-800 rounded border dark:border-slate-700 flex items-center justify-center">
+                                  <Image className="w-4 h-4 text-gray-300 dark:text-slate-500" />
                                 </div>
                               )}
                             </td>
                             <td className="px-3 py-2 font-mono text-xs">{product.markNo}</td>
                             <td className="px-3 py-2 font-medium max-w-48 truncate">{product.description}</td>
                             <td className="px-3 py-2">{product.pcsPerCtn}</td>
-                            <td className="px-3 py-2 text-green-700 font-medium">{product.pricePerPcs ? `¥${formatDecimal(product.pricePerPcs)}` : '-'}</td>
+                            <td className="px-3 py-2 text-green-700 dark:text-green-300 font-medium">{product.pricePerPcs ? `¥${formatDecimal(product.pricePerPcs)}` : '-'}</td>
                             <td className="px-3 py-2">{product.gwPerCtn}</td>
                             <td className="px-3 py-2">{product.cbmPerCtn}</td>
-                            <td className="px-3 py-2 text-xs text-gray-500 max-w-24 truncate">{product.source}</td>
+                            <td className="px-3 py-2 text-xs text-gray-500 dark:text-slate-400 max-w-24 truncate">{product.source}</td>
                             <td className="px-3 py-2">
                               <div className="flex items-center gap-1">
                                 <input
@@ -802,19 +809,19 @@ const ContainerOptimizer = () => {
                                   placeholder="CTN"
                                   value={ctnInputs[product.id] || ''}
                                   onChange={(e) => setCtnInputs({ ...ctnInputs, [product.id]: e.target.value })}
-                                  className="w-16 px-2 py-1 border rounded text-center text-sm"
+                                  className="w-16 px-2 py-1 border dark:border-slate-700 rounded text-center text-sm"
                                 />
                                 <button
                                   onClick={() => {
                                     addToShipment(product, ctnInputs[product.id] || 1);
                                     setCtnInputs({ ...ctnInputs, [product.id]: '' });
                                   }}
-                                  className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 transition text-xs"
+                                  className="bg-green-600 dark:bg-green-700 text-white px-2 py-1 rounded hover:bg-green-700 dark:hover:bg-green-800 transition text-xs"
                                 >
                                   <Plus className="w-3 h-3" />
                                 </button>
                                 {inShipment && (
-                                  <span className="text-xs text-green-700 font-medium ml-1">({inShipment.ctn})</span>
+                                  <span className="text-xs text-green-700 dark:text-green-300 font-medium ml-1">({inShipment.ctn})</span>
                                 )}
                               </div>
                             </td>
@@ -825,57 +832,57 @@ const ContainerOptimizer = () => {
                   </table>
                 </div>
               ) : catalog.length === 0 ? (
-                <div className="text-center py-8 text-gray-400">
+                <div className="text-center py-8 text-gray-400 dark:text-slate-400">
                   <Upload className="w-12 h-12 mx-auto mb-2" />
                   <p>Upload one or more XLSX files to build your product catalog</p>
                 </div>
               ) : (
-                <p className="text-center py-4 text-gray-400">No products match "{searchTerm}"</p>
+                <p className="text-center py-4 text-gray-400 dark:text-slate-400">No products match "{searchTerm}"</p>
               )}
             </>
           )}
         </div>
 
         {/* MANUAL ADD SECTION */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg dark:shadow-black/20 p-6 mb-4">
           <div className="flex items-center gap-3 cursor-pointer mb-4" onClick={() => setShowManualAdd(!showManualAdd)}>
             {showManualAdd ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-            <h2 className="text-xl font-bold text-gray-800">Add Product Manually</h2>
+            <h2 className="text-xl font-bold text-gray-800 dark:text-slate-100">Add Product Manually</h2>
           </div>
 
           {showManualAdd && (
-            <div className="border rounded-lg p-4 bg-slate-50">
+            <div className="border dark:border-slate-700 rounded-lg p-4 bg-slate-50 dark:bg-slate-800/50">
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-3">
                 <input type="text" placeholder="MARKS&NO" value={newProduct.markNo}
                   onChange={(e) => setNewProduct({ ...newProduct, markNo: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm" />
                 <input type="text" placeholder="Description *" value={newProduct.description}
                   onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm col-span-2" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm col-span-2" />
                 <input type="number" placeholder="PCS/CTN" value={newProduct.pcsPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, pcsPerCtn: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm" />
                 <input type="number" step={DECIMAL_STEP} placeholder="U/Price (¥)" value={newProduct.pricePerPcs}
                   onChange={(e) => setNewProduct({ ...newProduct, pricePerPcs: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm" />
                 <input type="number" step={DECIMAL_STEP} placeholder="G.W./CTN (kg)" value={newProduct.gwPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, gwPerCtn: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm" />
                 <input type="number" step={DECIMAL_STEP} placeholder="N.W./CTN (kg)" value={newProduct.nwPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, nwPerCtn: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm" />
                 <input type="number" step={DECIMAL_STEP} placeholder="CBM/CTN" value={newProduct.cbmPerCtn}
                   onChange={(e) => setNewProduct({ ...newProduct, cbmPerCtn: e.target.value })}
-                  className="px-3 py-2 border rounded text-sm" />
+                  className="px-3 py-2 border dark:border-slate-700 rounded text-sm" />
               </div>
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded border text-sm hover:bg-gray-50">
-                  <Image className="w-4 h-4 text-gray-500" />
+                <label className="flex items-center gap-2 cursor-pointer bg-white dark:bg-slate-900 px-3 py-2 rounded border dark:border-slate-700 text-sm hover:bg-gray-50 dark:hover:bg-slate-800">
+                  <Image className="w-4 h-4 text-gray-500 dark:text-slate-400" />
                   <span>Photo</span>
                   <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
                 </label>
                 {newProduct.photo && (
-                  <img src={newProduct.photo} alt="" className="w-10 h-10 object-cover rounded border" />
+                  <img src={newProduct.photo} alt="" className="w-10 h-10 object-cover rounded border dark:border-slate-700" />
                 )}
                 <button onClick={addManualProduct}
                   className="ml-auto bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition text-sm flex items-center gap-1">
@@ -888,25 +895,25 @@ const ContainerOptimizer = () => {
 
         {/* SHIPMENT LIST */}
         {shipment.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg dark:shadow-black/20 p-6 mb-4">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <ShoppingCart className="w-6 h-6 text-green-600" />
+              <h2 className="text-xl font-bold text-gray-800 dark:text-slate-100 flex items-center gap-2">
+                <ShoppingCart className="w-6 h-6 text-green-600 dark:text-green-400" />
                 Shipment List
-                <span className="bg-green-600 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">{shipment.length} Products</span>
-                <span className="text-sm font-normal text-gray-500">({shipmentTotals.ctn} CTN)</span>
+                <span className="bg-green-600 dark:bg-green-700 text-white text-xs font-bold px-2.5 py-0.5 rounded-full">{shipment.length} Products</span>
+                <span className="text-sm font-normal text-gray-500 dark:text-slate-400">({shipmentTotals.ctn} CTN)</span>
               </h2>
               <div className="flex items-center gap-2">
                 <div className="flex gap-2 text-xs flex-wrap">
-                  <span className="bg-green-100 text-green-800 px-2 py-1 rounded">G.W: {formatDecimal(shipmentTotals.gw)} kg</span>
-                  <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded">CBM: {formatDecimal(shipmentTotals.cbm)} m³</span>
-                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded">¥{formatDecimal(shipmentTotals.price)}</span>
-                  <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded">
+                  <span className="bg-green-100 dark:bg-green-950/50 text-green-800 dark:text-green-300 px-2 py-1 rounded">G.W: {formatDecimal(shipmentTotals.gw)} kg</span>
+                  <span className="bg-blue-100 dark:bg-blue-950/50 text-blue-800 dark:text-blue-300 px-2 py-1 rounded">CBM: {formatDecimal(shipmentTotals.cbm)} m³</span>
+                  <span className="bg-yellow-100 dark:bg-yellow-950/50 text-yellow-800 dark:text-yellow-300 px-2 py-1 rounded">¥{formatDecimal(shipmentTotals.price)}</span>
+                  <span className="bg-orange-100 dark:bg-orange-950/50 text-orange-800 dark:text-orange-300 px-2 py-1 rounded">
                     ~{Math.ceil(Math.max(shipmentTotals.gw / (maxWeight || 1), shipmentTotals.cbm / (maxCbm || 1)))} container(s)
                   </span>
                 </div>
                 <button onClick={() => setClearAllModal(true)}
-                  className="bg-red-50 text-red-600 px-3 py-1.5 rounded border border-red-200 hover:bg-red-100 transition text-xs font-medium flex items-center gap-1.5"
+                  className="bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400 px-3 py-1.5 rounded border border-red-200 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-900/40 transition text-xs font-medium flex items-center gap-1.5"
                   title="Clear all products and containers">
                   <Trash2 className="w-3.5 h-3.5" /> Clear All
                 </button>
@@ -915,55 +922,55 @@ const ContainerOptimizer = () => {
 
             {/* Shipment Search Bar */}
             <div className="relative mb-3">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-400" />
               <input
                 type="text"
                 placeholder="Filter shipment by MARKS&NO or description..."
                 value={shipmentSearchTerm}
                 onChange={(e) => setShipmentSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-20 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm"
+                className="w-full pl-10 pr-20 py-2 border dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 dark:focus:ring-green-400 focus:border-transparent text-sm"
               />
               {shipmentSearchTerm && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                  <span className="text-xs text-gray-500">{filteredSortedShipment.length} of {shipment.length}</span>
-                  <button onClick={() => setShipmentSearchTerm('')} className="text-gray-400 hover:text-gray-600">
+                  <span className="text-xs text-gray-500 dark:text-slate-400">{filteredSortedShipment.length} of {shipment.length}</span>
+                  <button onClick={() => setShipmentSearchTerm('')} className="text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-300">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               )}
             </div>
 
-            <div className="border rounded-lg overflow-x-auto mb-4">
+            <div className="border dark:border-slate-700 rounded-lg overflow-x-auto mb-4">
               <table className="w-full text-sm">
-                <thead className="bg-green-50">
+                <thead className="bg-green-50 dark:bg-green-950/50">
                   <tr>
-                    <th className="px-2 py-2 text-center font-bold border-b w-10">#</th>
-                    <th className="px-3 py-2 text-left font-bold border-b">Photo</th>
+                    <th className="px-2 py-2 text-center font-bold border-b dark:border-slate-700 w-10">#</th>
+                    <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Photo</th>
                     <SortHeader label="Mark No" sortKey="markNo" />
                     <SortHeader label="Description" sortKey="description" />
                     <SortHeader label="CTN" sortKey="ctn" />
                     <SortHeader label="PCS/CTN" sortKey="pcsPerCtn" />
                     <SortHeader label="T/QTY" sortKey="totalQty" />
-                    <th className="px-3 py-2 text-left font-bold border-b">U/Price</th>
-                    <th className="px-3 py-2 text-left font-bold border-b">Amount</th>
+                    <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">U/Price</th>
+                    <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Amount</th>
                     <SortHeader label="G.W." sortKey="totalGW" />
                     <SortHeader label="N.W." sortKey="totalNW" />
                     <SortHeader label="CBM" sortKey="totalCBM" />
-                    <th className="px-3 py-2 text-left font-bold border-b">Source</th>
-                    <th className="px-3 py-2 text-center font-bold border-b">Actions</th>
+                    <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Source</th>
+                    <th className="px-3 py-2 text-center font-bold border-b dark:border-slate-700">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredSortedShipment.map((item, rowIndex) => (
-                    <tr key={item.id} className="border-b hover:bg-gray-50">
-                      <td className="px-2 py-2 text-center text-xs text-gray-400 font-mono">{rowIndex + 1}</td>
+                    <tr key={item.id} className="border-b dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800">
+                      <td className="px-2 py-2 text-center text-xs text-gray-400 dark:text-slate-400 font-mono">{rowIndex + 1}</td>
                       <td className="px-3 py-2">
                         {item.photo ? (
-                          <img src={item.photo} alt="" className="w-10 h-10 object-cover rounded border cursor-pointer hover:opacity-80 transition"
+                          <img src={item.photo} alt="" className="w-10 h-10 object-cover rounded border dark:border-slate-700 cursor-pointer hover:opacity-80 transition"
                             onClick={() => setPhotoModal({ show: true, src: item.photo, alt: item.description })} />
                         ) : (
-                          <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center">
-                            <Image className="w-3 h-3 text-gray-300" />
+                          <div className="w-10 h-10 bg-gray-100 dark:bg-slate-800 rounded border dark:border-slate-700 flex items-center justify-center">
+                            <Image className="w-3 h-3 text-gray-300 dark:text-slate-500" />
                           </div>
                         )}
                       </td>
@@ -975,23 +982,23 @@ const ContainerOptimizer = () => {
                           min="1"
                           value={item.ctn}
                           onChange={(e) => updateShipmentCtn(item.id, e.target.value)}
-                          className="w-16 px-2 py-1 border rounded text-center text-sm"
+                          className="w-16 px-2 py-1 border dark:border-slate-700 rounded text-center text-sm"
                         />
                       </td>
                       <td className="px-3 py-2">{item.pcsPerCtn}</td>
                       <td className="px-3 py-2 font-medium">{item.totalQty}</td>
-                      <td className="px-3 py-2 text-green-700">{item.pricePerPcs ? `¥${formatDecimal(item.pricePerPcs)}` : '-'}</td>
-                      <td className="px-3 py-2 font-medium text-green-700">¥{formatDecimal(item.totalPrice || 0)}</td>
+                      <td className="px-3 py-2 text-green-700 dark:text-green-300">{item.pricePerPcs ? `¥${formatDecimal(item.pricePerPcs)}` : '-'}</td>
+                      <td className="px-3 py-2 font-medium text-green-700 dark:text-green-300">¥{formatDecimal(item.totalPrice || 0)}</td>
                       <td className="px-3 py-2">{formatDecimal(item.totalGW)}</td>
                       <td className="px-3 py-2">{formatDecimal(item.totalNW)}</td>
                       <td className="px-3 py-2">{formatDecimal(item.totalCBM)}</td>
-                      <td className="px-3 py-2 text-xs text-gray-400 max-w-20 truncate">{item.source}</td>
+                      <td className="px-3 py-2 text-xs text-gray-400 dark:text-slate-400 max-w-20 truncate">{item.source}</td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1 justify-center">
-                          <button onClick={() => duplicateShipmentProduct(item)} className="text-blue-500 hover:text-blue-700 p-0.5" title="Duplicate product">
+                          <button onClick={() => duplicateShipmentProduct(item)} className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-200 p-0.5" title="Duplicate product">
                             <Copy className="w-4 h-4" />
                           </button>
-                          <button onClick={() => removeFromShipment(item.id)} className="text-red-500 hover:text-red-700 p-0.5" title="Remove product">
+                          <button onClick={() => removeFromShipment(item.id)} className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-200 p-0.5" title="Remove product">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -1006,7 +1013,7 @@ const ContainerOptimizer = () => {
               onClick={optimizeContainers}
               disabled={isGenerating}
               className={`text-white px-8 py-3 rounded-lg transition font-semibold text-lg w-full flex items-center justify-center gap-3 ${
-                isGenerating ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
+                isGenerating ? 'bg-gray-400 dark:bg-slate-600 cursor-not-allowed' : 'bg-green-600 dark:bg-green-700 hover:bg-green-700 dark:hover:bg-green-800'
               }`}
             >
               {isGenerating ? (
@@ -1022,24 +1029,24 @@ const ContainerOptimizer = () => {
 
         {/* CONTAINER RESULTS */}
         {containers.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-lg dark:shadow-black/20 p-6 mb-4">
             <div className="flex flex-wrap justify-between items-center mb-4 gap-2">
-              <h2 className="text-xl font-bold text-gray-800">
+              <h2 className="text-xl font-bold text-gray-800 dark:text-slate-100">
                 Packing List: {containers.length} Container{containers.length > 1 ? 's' : ''}
               </h2>
               <div className="flex flex-wrap gap-2">
                 {deletedContainers.length > 0 && (
                   <button onClick={undoDeleteContainer}
-                    className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition flex items-center gap-2 text-sm">
+                    className="bg-yellow-500 dark:bg-yellow-700 text-white px-4 py-2 rounded hover:bg-yellow-600 dark:hover:bg-yellow-800 transition flex items-center gap-2 text-sm">
                     <Undo2 className="w-4 h-4" /> Undo Delete
                   </button>
                 )}
                 <button onClick={addEmptyContainer}
-                  className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition flex items-center gap-2 text-sm">
+                  className="bg-green-600 dark:bg-green-700 text-white px-4 py-2 rounded hover:bg-green-700 dark:hover:bg-green-800 transition flex items-center gap-2 text-sm">
                   <PlusCircle className="w-4 h-4" /> Add Empty Container
                 </button>
                 <button onClick={exportAllCSV}
-                  className="bg-teal-600 text-white px-4 py-2 rounded hover:bg-teal-700 transition flex items-center gap-2 text-sm">
+                  className="bg-teal-600 dark:bg-teal-700 text-white px-4 py-2 rounded hover:bg-teal-700 dark:hover:bg-teal-800 transition flex items-center gap-2 text-sm">
                   <FileText className="w-4 h-4" /> Export All CSV
                 </button>
                 <button onClick={exportToXlsx}
@@ -1051,29 +1058,29 @@ const ContainerOptimizer = () => {
 
             {/* ── Grand Totals ── */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5 text-sm">
-              <div className="bg-slate-100 p-3 rounded border">
-                <p className="text-gray-500 text-xs">Total Cartons</p>
-                <p className="text-lg font-bold text-slate-800">{grandTotals.cartons}</p>
+              <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded border dark:border-slate-700">
+                <p className="text-gray-500 dark:text-slate-400 text-xs">Total Cartons</p>
+                <p className="text-lg font-bold text-slate-800 dark:text-slate-100">{grandTotals.cartons}</p>
               </div>
-              <div className="bg-slate-100 p-3 rounded border">
-                <p className="text-gray-500 text-xs">Total T/QTY</p>
-                <p className="text-lg font-bold text-slate-800">{grandTotals.qty}</p>
+              <div className="bg-slate-100 dark:bg-slate-800 p-3 rounded border dark:border-slate-700">
+                <p className="text-gray-500 dark:text-slate-400 text-xs">Total T/QTY</p>
+                <p className="text-lg font-bold text-slate-800 dark:text-slate-100">{grandTotals.qty}</p>
               </div>
-              <div className="bg-green-50 p-3 rounded border border-green-200">
-                <p className="text-gray-500 text-xs">Total G.W.</p>
-                <p className="text-lg font-bold text-green-700">{formatDecimal(grandTotals.gw)} kg</p>
+              <div className="bg-green-50 dark:bg-green-950/50 p-3 rounded border border-green-200 dark:border-green-900">
+                <p className="text-gray-500 dark:text-slate-400 text-xs">Total G.W.</p>
+                <p className="text-lg font-bold text-green-700 dark:text-green-300">{formatDecimal(grandTotals.gw)} kg</p>
               </div>
-              <div className="bg-purple-50 p-3 rounded border border-purple-200">
-                <p className="text-gray-500 text-xs">Total N.W.</p>
-                <p className="text-lg font-bold text-purple-700">{formatDecimal(grandTotals.nw)} kg</p>
+              <div className="bg-purple-50 dark:bg-purple-950/50 p-3 rounded border border-purple-200 dark:border-purple-900">
+                <p className="text-gray-500 dark:text-slate-400 text-xs">Total N.W.</p>
+                <p className="text-lg font-bold text-purple-700 dark:text-purple-300">{formatDecimal(grandTotals.nw)} kg</p>
               </div>
-              <div className="bg-orange-50 p-3 rounded border border-orange-200">
-                <p className="text-gray-500 text-xs">Total CBM</p>
-                <p className="text-lg font-bold text-orange-700">{formatDecimal(grandTotals.cbm)} m³</p>
+              <div className="bg-orange-50 dark:bg-orange-950/50 p-3 rounded border border-orange-200 dark:border-orange-900">
+                <p className="text-gray-500 dark:text-slate-400 text-xs">Total CBM</p>
+                <p className="text-lg font-bold text-orange-700 dark:text-orange-300">{formatDecimal(grandTotals.cbm)} m³</p>
               </div>
-              <div className="bg-yellow-50 p-3 rounded border border-yellow-200">
-                <p className="text-gray-500 text-xs">Total Price</p>
-                <p className="text-lg font-bold text-yellow-700">¥{formatDecimal(grandTotals.price)}</p>
+              <div className="bg-yellow-50 dark:bg-yellow-950/50 p-3 rounded border border-yellow-200 dark:border-yellow-900">
+                <p className="text-gray-500 dark:text-slate-400 text-xs">Total Price</p>
+                <p className="text-lg font-bold text-yellow-700 dark:text-yellow-300">¥{formatDecimal(grandTotals.price)}</p>
               </div>
             </div>
 
@@ -1091,8 +1098,8 @@ const ContainerOptimizer = () => {
               });
 
               return (
-                <div key={container.id} className={`border-2 rounded-lg p-5 mb-4 shadow-sm ${getContainerBorderColor(container)}`}>
-                  <div className="flex items-center justify-between bg-slate-100 p-3 rounded mb-3 gap-2 flex-wrap">
+                <div key={container.id} className={`border-2 rounded-lg p-5 mb-4 shadow-sm dark:shadow-black/20 ${getContainerBorderColor(container)}`}>
+                  <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800 p-3 rounded mb-3 gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
                       {editingContainerName === container.id ? (
                         <div className="flex items-center gap-2">
@@ -1101,30 +1108,30 @@ const ContainerOptimizer = () => {
                             value={tempContainerName}
                             onChange={(e) => setTempContainerName(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') saveContainerName(container.id); if (e.key === 'Escape') setEditingContainerName(null); }}
-                            className="px-2 py-1 border rounded text-sm font-bold"
+                            className="px-2 py-1 border dark:border-slate-700 rounded text-sm font-bold"
                             autoFocus
                           />
-                          <button onClick={() => saveContainerName(container.id)} className="text-green-600 hover:text-green-800">
+                          <button onClick={() => saveContainerName(container.id)} className="text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200">
                             <CheckCircle className="w-4 h-4" />
                           </button>
-                          <button onClick={() => setEditingContainerName(null)} className="text-gray-400 hover:text-gray-600">
+                          <button onClick={() => setEditingContainerName(null)} className="text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-300">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
                       ) : (
                         <>
-                          <h3 className="text-lg font-bold text-gray-800">
+                          <h3 className="text-lg font-bold text-gray-800 dark:text-slate-100">
                             {containerNames[container.id] || `CONTAINER #${container.id}`}
                           </h3>
                           <button onClick={() => startRenamingContainer(container.id)}
-                            className="text-gray-400 hover:text-blue-600 transition" title="Rename container">
+                            className="text-gray-400 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-200 transition" title="Rename container">
                             <Edit3 className="w-4 h-4" />
                           </button>
                           {/* Utilization badge */}
                           {(() => {
                             const mp = Math.max(weightPercent, cbmPercent);
                             const label = mp > 100 ? 'Over' : mp >= 95 ? 'Near Full' : mp >= 80 ? 'Optimal' : mp >= 70 ? 'Moderate' : 'Low';
-                            const cls = mp > 100 ? 'bg-blue-100 text-blue-700' : mp >= 95 ? 'bg-yellow-100 text-yellow-700' : mp >= 80 ? 'bg-green-100 text-green-700' : mp >= 70 ? 'bg-slate-100 text-slate-600' : 'bg-red-100 text-red-600';
+                            const cls = mp > 100 ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300' : mp >= 95 ? 'bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300' : mp >= 80 ? 'bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-300' : mp >= 70 ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' : 'bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400';
                             return <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{mp.toFixed(0)}% — {label}</span>;
                           })()}
                         </>
@@ -1133,7 +1140,7 @@ const ContainerOptimizer = () => {
                     <div className="flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => setAddToContainerModal({ show: true, containerId: container.id })}
-                        className="bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 transition flex items-center gap-1.5 text-sm"
+                        className="bg-green-600 dark:bg-green-700 text-white px-3 py-1.5 rounded hover:bg-green-700 dark:hover:bg-green-800 transition flex items-center gap-1.5 text-sm"
                       >
                         <Plus className="w-3.5 h-3.5" /> Add Products
                       </button>
@@ -1145,7 +1152,7 @@ const ContainerOptimizer = () => {
                       </button>
                       <button
                         onClick={() => exportContainerCSV(container)}
-                        className="bg-teal-600 text-white px-3 py-1.5 rounded hover:bg-teal-700 transition flex items-center gap-1.5 text-sm"
+                        className="bg-teal-600 dark:bg-teal-700 text-white px-3 py-1.5 rounded hover:bg-teal-700 dark:hover:bg-teal-800 transition flex items-center gap-1.5 text-sm"
                       >
                         <FileText className="w-3.5 h-3.5" /> CSV
                       </button>
@@ -1165,25 +1172,25 @@ const ContainerOptimizer = () => {
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3 text-sm">
-                    <div className="bg-blue-50 p-3 rounded">
-                      <p className="text-gray-600">Cartons</p>
-                      <p className="text-xl font-bold text-blue-700">{container.totalCartons}</p>
+                    <div className="bg-blue-50 dark:bg-blue-950/50 p-3 rounded">
+                      <p className="text-gray-600 dark:text-slate-300">Cartons</p>
+                      <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{container.totalCartons}</p>
                     </div>
-                    <div className="bg-green-50 p-3 rounded">
-                      <p className="text-gray-600">G.W.</p>
-                      <p className="text-xl font-bold text-green-700">{formatDecimal(container.totalGW)} kg</p>
+                    <div className="bg-green-50 dark:bg-green-950/50 p-3 rounded">
+                      <p className="text-gray-600 dark:text-slate-300">G.W.</p>
+                      <p className="text-xl font-bold text-green-700 dark:text-green-300">{formatDecimal(container.totalGW)} kg</p>
                     </div>
-                    <div className="bg-purple-50 p-3 rounded">
-                      <p className="text-gray-600">N.W.</p>
-                      <p className="text-xl font-bold text-purple-700">{formatDecimal(container.totalNW)} kg</p>
+                    <div className="bg-purple-50 dark:bg-purple-950/50 p-3 rounded">
+                      <p className="text-gray-600 dark:text-slate-300">N.W.</p>
+                      <p className="text-xl font-bold text-purple-700 dark:text-purple-300">{formatDecimal(container.totalNW)} kg</p>
                     </div>
-                    <div className="bg-orange-50 p-3 rounded">
-                      <p className="text-gray-600">CBM</p>
-                      <p className="text-xl font-bold text-orange-700">{formatDecimal(container.totalCBM)} m³</p>
+                    <div className="bg-orange-50 dark:bg-orange-950/50 p-3 rounded">
+                      <p className="text-gray-600 dark:text-slate-300">CBM</p>
+                      <p className="text-xl font-bold text-orange-700 dark:text-orange-300">{formatDecimal(container.totalCBM)} m³</p>
                     </div>
-                    <div className="bg-yellow-50 p-3 rounded">
-                      <p className="text-gray-600">Total Price</p>
-                      <p className="text-xl font-bold text-yellow-700">¥{formatDecimal(container.totalPrice || 0)}</p>
+                    <div className="bg-yellow-50 dark:bg-yellow-950/50 p-3 rounded">
+                      <p className="text-gray-600 dark:text-slate-300">Total Price</p>
+                      <p className="text-xl font-bold text-yellow-700 dark:text-yellow-300">¥{formatDecimal(container.totalPrice || 0)}</p>
                     </div>
                   </div>
 
@@ -1193,8 +1200,8 @@ const ContainerOptimizer = () => {
                       <div className="flex justify-between text-xs mb-1">
                         <span>Weight</span><span>{weightPercent.toFixed(1)}%</span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className={`h-2 rounded-full ${weightPercent > 95 ? 'bg-red-500' : weightPercent > 80 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                      <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${weightPercent > 95 ? 'bg-red-500 dark:bg-red-400' : weightPercent > 80 ? 'bg-yellow-500 dark:bg-yellow-400' : 'bg-green-500 dark:bg-green-400'}`}
                           style={{ width: `${Math.min(weightPercent, 100)}%` }}></div>
                       </div>
                     </div>
@@ -1202,29 +1209,31 @@ const ContainerOptimizer = () => {
                       <div className="flex justify-between text-xs mb-1">
                         <span>Volume</span><span>{cbmPercent.toFixed(1)}%</span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className={`h-2 rounded-full ${cbmPercent > 95 ? 'bg-red-500' : cbmPercent > 80 ? 'bg-yellow-500' : 'bg-blue-500'}`}
+                      <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${cbmPercent > 95 ? 'bg-red-500 dark:bg-red-400' : cbmPercent > 80 ? 'bg-yellow-500 dark:bg-yellow-400' : 'bg-blue-500 dark:bg-blue-400'}`}
                           style={{ width: `${Math.min(cbmPercent, 100)}%` }}></div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="border rounded overflow-x-auto">
+                  <ContainerContents container={container} maxCbm={maxCbm} active={active3DContainerId === container.id}
+                    onViewChange={show3D => setActive3DContainerId(show3D ? container.id : null)}>
+                  <div className="border dark:border-slate-700 rounded overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="bg-gray-50">
+                      <thead className="bg-gray-50 dark:bg-slate-800">
                         <tr>
-                          <th className="px-3 py-2 text-left font-bold border-b">Photo</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">MARKS&NO</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">DESCRIPTION</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">CTN</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">PCS/CTN</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">T/QTY</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">U/PRICE</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">AMOUNT</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">G.W.</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">N.W.</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">CBM</th>
-                          <th className="px-3 py-2 text-left font-bold border-b">Move</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Photo</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">MARKS&NO</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">DESCRIPTION</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">CTN</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">PCS/CTN</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">T/QTY</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">U/PRICE</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">AMOUNT</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">G.W.</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">N.W.</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">CBM</th>
+                          <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Move</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1232,14 +1241,14 @@ const ContainerOptimizer = () => {
                           const totalQty = data.count * data.pcsPerCtn;
                           const amount = (data.pricePerPcs || 0) * totalQty;
                           return (
-                            <tr key={idx} className="border-b">
+                            <tr key={idx} className="border-b dark:border-slate-700">
                               <td className="px-3 py-2">
                                 {data.photo ? (
-                                  <img src={data.photo} alt="" className="w-10 h-10 object-cover rounded border cursor-pointer hover:opacity-80 transition"
+                                  <img src={data.photo} alt="" className="w-10 h-10 object-cover rounded border dark:border-slate-700 cursor-pointer hover:opacity-80 transition"
                                     onClick={() => setPhotoModal({ show: true, src: data.photo, alt: data.description })} />
                                 ) : (
-                                  <div className="w-10 h-10 bg-gray-100 rounded border flex items-center justify-center">
-                                    <Image className="w-3 h-3 text-gray-300" />
+                                  <div className="w-10 h-10 bg-gray-100 dark:bg-slate-800 rounded border dark:border-slate-700 flex items-center justify-center">
+                                    <Image className="w-3 h-3 text-gray-300 dark:text-slate-500" />
                                   </div>
                                 )}
                               </td>
@@ -1248,8 +1257,8 @@ const ContainerOptimizer = () => {
                               <td className="px-3 py-2 font-medium">{data.count}</td>
                               <td className="px-3 py-2">{data.pcsPerCtn}</td>
                               <td className="px-3 py-2 font-medium">{totalQty}</td>
-                              <td className="px-3 py-2 text-green-700">{data.pricePerPcs ? `¥${formatDecimal(data.pricePerPcs)}` : '-'}</td>
-                              <td className="px-3 py-2 font-medium text-green-700">¥{formatDecimal(amount)}</td>
+                              <td className="px-3 py-2 text-green-700 dark:text-green-300">{data.pricePerPcs ? `¥${formatDecimal(data.pricePerPcs)}` : '-'}</td>
+                              <td className="px-3 py-2 font-medium text-green-700 dark:text-green-300">¥{formatDecimal(amount)}</td>
                               <td className="px-3 py-2">{formatDecimal(data.gwPerCtn * data.count)}</td>
                               <td className="px-3 py-2">{formatDecimal(data.nwPerCtn * data.count)}</td>
                               <td className="px-3 py-2">{formatDecimal(data.cbmPerCtn * data.count)}</td>
@@ -1261,14 +1270,14 @@ const ContainerOptimizer = () => {
                                       min="1"
                                       max={data.count}
                                       defaultValue={data.count}
-                                      className="w-14 px-1 py-0.5 border rounded text-center text-xs"
+                                      className="w-14 px-1 py-0.5 border dark:border-slate-700 rounded text-center text-xs"
                                       id={`move-qty-${container.id}-${idx}`}
                                     />
-                                    <span className="text-xs text-gray-400">CTN</span>
+                                    <span className="text-xs text-gray-400 dark:text-slate-400">CTN</span>
                                   </div>
                                   <div className="flex items-center gap-1">
                                     <select
-                                      className="text-xs border rounded px-1 py-0.5 bg-white"
+                                      className="text-xs border dark:border-slate-700 rounded px-1 py-0.5 bg-white dark:bg-slate-900"
                                       defaultValue=""
                                       onChange={(e) => {
                                         const targetId = parseInt(e.target.value);
@@ -1290,7 +1299,7 @@ const ContainerOptimizer = () => {
                                         const qty = parseInt(qtyEl?.value) || data.count;
                                         removeProductFromContainer(container.id, data.key, qty);
                                       }}
-                                      className="text-red-500 hover:text-red-700 p-0.5"
+                                      className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-200 p-0.5"
                                       title="Remove from container"
                                     >
                                       <X className="w-3.5 h-3.5" />
@@ -1304,6 +1313,7 @@ const ContainerOptimizer = () => {
                       </tbody>
                     </table>
                   </div>
+                  </ContainerContents>
                 </div>
               );
             })}
@@ -1314,7 +1324,7 @@ const ContainerOptimizer = () => {
         {containers.length === 0 && shipment.length > 0 && (
           <div className="text-center py-4">
             <button onClick={addEmptyContainer}
-              className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-sm inline-flex items-center gap-2">
+              className="bg-green-600 dark:bg-green-700 text-white px-6 py-3 rounded-lg hover:bg-green-700 dark:hover:bg-green-800 transition font-semibold text-sm inline-flex items-center gap-2">
               <PlusCircle className="w-5 h-5" /> Create Empty Container Manually
             </button>
           </div>
@@ -1322,8 +1332,8 @@ const ContainerOptimizer = () => {
 
         {/* ── TOAST NOTIFICATION ── */}
         {toastMessage && (
-          <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-lg shadow-xl text-white text-sm font-medium transition-all animate-fade-in ${
-            toastMessage.type === 'error' ? 'bg-red-600' : 'bg-green-600'
+          <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3 rounded-lg shadow-xl dark:shadow-black/20 text-white text-sm font-medium transition-all animate-fade-in ${
+            toastMessage.type === 'error' ? 'bg-red-600' : 'bg-green-600 dark:bg-green-700'
           }`}>
             {toastMessage.type === 'error' ? (
               <AlertTriangle className="w-5 h-5 flex-shrink-0" />
@@ -1339,23 +1349,23 @@ const ContainerOptimizer = () => {
 
         {/* ── DELETE CONFIRMATION MODAL ── */}
         {deleteModal.show && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setDeleteModal({ show: false, containerId: null })}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50" onClick={() => setDeleteModal({ show: false, containerId: null })}>
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl dark:shadow-black/20 p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <Trash2 className="w-5 h-5 text-red-600" />
+                <div className="w-10 h-10 bg-red-100 dark:bg-red-950/50 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-800">Delete Container</h3>
+                <h3 className="text-lg font-bold text-gray-800 dark:text-slate-100">Delete Container</h3>
               </div>
-              <p className="text-gray-600 mb-2">
+              <p className="text-gray-600 dark:text-slate-300 mb-2">
                 Are you sure you want to delete <strong>{containerNames[deleteModal.containerId] || `Container #${deleteModal.containerId}`}</strong>?
               </p>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className="text-sm text-gray-500 dark:text-slate-400 mb-6">
                 The products in this container will be considered as shipped and will <strong>not</strong> return to the shipment list. You can undo this action.
               </p>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setDeleteModal({ show: false, containerId: null })}
-                  className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50 transition text-sm font-medium">
+                  className="px-4 py-2 rounded border dark:border-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition text-sm font-medium">
                   Cancel
                 </button>
                 <button onClick={executeDeleteContainer}
@@ -1369,15 +1379,15 @@ const ContainerOptimizer = () => {
 
         {/* ── ADD PRODUCTS TO CONTAINER MODAL ── */}
         {addToContainerModal.show && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => { setAddToContainerModal({ show: false, containerId: null }); setAddToContainerCtn({}); }}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50" onClick={() => { setAddToContainerModal({ show: false, containerId: null }); setAddToContainerCtn({}); }}>
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl dark:shadow-black/20 p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                  <Plus className="w-5 h-5 text-green-600" />
+                <h3 className="text-lg font-bold text-gray-800 dark:text-slate-100 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-green-600 dark:text-green-400" />
                   Add Products to {containerNames[addToContainerModal.containerId] || `Container #${addToContainerModal.containerId}`}
                 </h3>
                 <button onClick={() => { setAddToContainerModal({ show: false, containerId: null }); setAddToContainerCtn({}); }}
-                  className="text-gray-400 hover:text-gray-600">
+                  className="text-gray-400 dark:text-slate-400 hover:text-gray-600 dark:hover:text-slate-300">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1387,33 +1397,33 @@ const ContainerOptimizer = () => {
                 const remainCBM = maxCbm - (targetContainer?.totalCBM || 0);
                 return (
                   <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
-                    <div className="bg-green-50 p-2 rounded border border-green-200">
-                      <span className="text-gray-600">Remaining Weight: </span>
-                      <span className="font-bold text-green-700">{formatDecimal(remainWeight)} kg</span>
+                    <div className="bg-green-50 dark:bg-green-950/50 p-2 rounded border border-green-200 dark:border-green-900">
+                      <span className="text-gray-600 dark:text-slate-300">Remaining Weight: </span>
+                      <span className="font-bold text-green-700 dark:text-green-300">{formatDecimal(remainWeight)} kg</span>
                     </div>
-                    <div className="bg-blue-50 p-2 rounded border border-blue-200">
-                      <span className="text-gray-600">Remaining Volume: </span>
-                      <span className="font-bold text-blue-700">{formatDecimal(remainCBM)} m³</span>
+                    <div className="bg-blue-50 dark:bg-blue-950/50 p-2 rounded border border-blue-200 dark:border-blue-900">
+                      <span className="text-gray-600 dark:text-slate-300">Remaining Volume: </span>
+                      <span className="font-bold text-blue-700 dark:text-blue-300">{formatDecimal(remainCBM)} m³</span>
                     </div>
                   </div>
                 );
               })()}
               {shipment.length > 0 ? (
-                <div className="border rounded-lg overflow-x-auto">
+                <div className="border dark:border-slate-700 rounded-lg overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-50 dark:bg-slate-800">
                       <tr>
-                        <th className="px-3 py-2 text-left font-bold border-b">Mark No</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Description</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">In Shipment</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">G.W./CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">CBM/CTN</th>
-                        <th className="px-3 py-2 text-left font-bold border-b">Add</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Mark No</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Description</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">In Shipment</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">G.W./CTN</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">CBM/CTN</th>
+                        <th className="px-3 py-2 text-left font-bold border-b dark:border-slate-700">Add</th>
                       </tr>
                     </thead>
                     <tbody>
                       {shipment.map(item => (
-                        <tr key={item.id} className="border-b hover:bg-blue-50 transition">
+                        <tr key={item.id} className="border-b dark:border-slate-700 hover:bg-blue-50 dark:hover:bg-blue-900/40 transition">
                           <td className="px-3 py-2 font-mono text-xs">{item.markNo}</td>
                           <td className="px-3 py-2 font-medium max-w-48 truncate">{item.description}</td>
                           <td className="px-3 py-2">{item.ctn} CTN</td>
@@ -1428,14 +1438,14 @@ const ContainerOptimizer = () => {
                                 placeholder="CTN"
                                 value={addToContainerCtn[item.id] || ''}
                                 onChange={(e) => setAddToContainerCtn(prev => ({ ...prev, [item.id]: e.target.value }))}
-                                className="w-16 px-2 py-1 border rounded text-center text-sm"
+                                className="w-16 px-2 py-1 border dark:border-slate-700 rounded text-center text-sm"
                               />
                               <button
                                 onClick={() => {
                                   addProductToContainer(addToContainerModal.containerId, item, addToContainerCtn[item.id] || 1);
                                   setAddToContainerCtn(prev => ({ ...prev, [item.id]: '' }));
                                 }}
-                                className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 transition text-xs"
+                                className="bg-green-600 dark:bg-green-700 text-white px-2 py-1 rounded hover:bg-green-700 dark:hover:bg-green-800 transition text-xs"
                               >
                                 <Plus className="w-3 h-3" />
                               </button>
@@ -1447,7 +1457,7 @@ const ContainerOptimizer = () => {
                   </table>
                 </div>
               ) : (
-                <p className="text-center py-6 text-gray-400">No products in shipment list. Add products to shipment first.</p>
+                <p className="text-center py-6 text-gray-400 dark:text-slate-400">No products in shipment list. Add products to shipment first.</p>
               )}
             </div>
           </div>
@@ -1455,13 +1465,13 @@ const ContainerOptimizer = () => {
 
         {/* ── PHOTO ENLARGEMENT MODAL ── */}
         {photoModal.show && (
-          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-8" onClick={() => setPhotoModal({ show: false, src: '', alt: '' })}>
+          <div className="fixed inset-0 bg-black/70 dark:bg-black/80 flex items-center justify-center z-50 p-8" onClick={() => setPhotoModal({ show: false, src: '', alt: '' })}>
             <div className="relative max-w-3xl max-h-[85vh]" onClick={e => e.stopPropagation()}>
               <button onClick={() => setPhotoModal({ show: false, src: '', alt: '' })}
-                className="absolute -top-3 -right-3 bg-white rounded-full p-1.5 shadow-lg text-gray-600 hover:text-gray-900 z-10">
+                className="absolute -top-3 -right-3 bg-white dark:bg-slate-900 rounded-full p-1.5 shadow-lg dark:shadow-black/20 text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-slate-50 z-10">
                 <X className="w-5 h-5" />
               </button>
-              <img src={photoModal.src} alt={photoModal.alt} className="max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain bg-white" />
+              <img src={photoModal.src} alt={photoModal.alt} className="max-w-full max-h-[85vh] rounded-lg shadow-2xl dark:shadow-black/20 object-contain bg-white dark:bg-slate-900" />
               {photoModal.alt && (
                 <p className="text-center text-white text-sm mt-3 opacity-80">{photoModal.alt}</p>
               )}
@@ -1471,23 +1481,23 @@ const ContainerOptimizer = () => {
 
         {/* ── CLEAR ALL CONFIRMATION MODAL ── */}
         {clearAllModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setClearAllModal(false)}>
-            <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50" onClick={() => setClearAllModal(false)}>
+            <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl dark:shadow-black/20 p-6 max-w-md w-full mx-4" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
-                  <Trash2 className="w-5 h-5 text-red-600" />
+                <div className="w-10 h-10 bg-red-100 dark:bg-red-950/50 rounded-full flex items-center justify-center">
+                  <Trash2 className="w-5 h-5 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-800">Clear All Products</h3>
+                <h3 className="text-lg font-bold text-gray-800 dark:text-slate-100">Clear All Products</h3>
               </div>
-              <p className="text-gray-600 mb-2">
+              <p className="text-gray-600 dark:text-slate-300 mb-2">
                 Are you sure you want to remove <strong>all products</strong> from the shipment and <strong>all containers</strong>?
               </p>
-              <p className="text-sm text-red-500 mb-6 font-medium">
+              <p className="text-sm text-red-500 dark:text-red-400 mb-6 font-medium">
                 This action cannot be undone.
               </p>
               <div className="flex justify-end gap-3">
                 <button onClick={() => setClearAllModal(false)}
-                  className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50 transition text-sm font-medium">
+                  className="px-4 py-2 rounded border dark:border-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 transition text-sm font-medium">
                   Cancel
                 </button>
                 <button onClick={executeClearAll}
